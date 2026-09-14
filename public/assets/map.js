@@ -189,6 +189,29 @@ export class FootprintMap {
       this.map.flyTo({ center: [pts[0].lon, pts[0].lat], zoom: 6, duration });
       return;
     }
+    if (this.globe) {
+      // En el globo, fitBounds encuadra mal huellas repartidas por varios continentes: se centra en el
+      // centroide esférico y el zoom depende de la distancia angular al punto más alejado.
+      const rad = Math.PI / 180;
+      let x = 0; let y = 0; let z = 0;
+      for (const loc of pts) {
+        x += Math.cos(loc.lat * rad) * Math.cos(loc.lon * rad);
+        y += Math.cos(loc.lat * rad) * Math.sin(loc.lon * rad);
+        z += Math.sin(loc.lat * rad);
+      }
+      const lon = Math.atan2(y, x) / rad;
+      const lat = Math.atan2(z, Math.hypot(x, y)) / rad;
+      const spread = Math.max(...pts.map((loc) => {
+        const cos = Math.sin(lat * rad) * Math.sin(loc.lat * rad) +
+          Math.cos(lat * rad) * Math.cos(loc.lat * rad) * Math.cos((loc.lon - lon) * rad);
+        return Math.acos(Math.min(1, Math.max(-1, cos))) / rad;
+      }));
+      if (spread > 18) {
+        const zoom = spread > 70 ? 1.15 : spread > 45 ? 1.6 : spread > 30 ? 2.2 : 2.8;
+        this.map.flyTo({ center: [lon, lat], zoom, duration, essential: true });
+        return;
+      }
+    }
     const bounds = new maplibregl.LngLatBounds();
     for (const loc of pts) bounds.extend([loc.lon, loc.lat]);
     this.map.fitBounds(bounds, { padding, maxZoom, duration });
