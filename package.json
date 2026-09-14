@@ -1,0 +1,15 @@
+{
+  "name": "address-tracker-demo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Portada y mesa de análisis de Address Tracker: huella corporativa geolocalizada con un flujo de nueve agentes.",
+  "scripts": {
+    "dev": "node scripts/serve.mjs",
+    "data": "python3 scripts/build_data.py",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

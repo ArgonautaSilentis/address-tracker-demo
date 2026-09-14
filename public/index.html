@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Address Tracker · La huella física de una empresa, geolocalizada</title>
+  <meta name="description" content="Nueve agentes especializados reconstruyen la huella corporativa, operativa y geográfica de una empresa a partir de su nombre, con la fuente de cada dato.">
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/vendor/maplibre-gl.css">
+  <link rel="stylesheet" href="/assets/base.css">
+  <link rel="stylesheet" href="/assets/landing.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Address Tracker">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="brand-copy"><strong>ADDRESS TRACKER</strong><span>HUELLA CORPORATIVA</span></span>
+    </a>
+    <nav class="topnav" aria-label="Secciones">
+      <a href="#reto">El reto</a>
+      <a href="#como-funciona">Cómo funciona</a>
+      <a href="#resultados">Resultados</a>
+      <a href="#usos">Casos de uso</a>
+      <a href="#arquitectura">Arquitectura</a>
+    </nav>
+    <a class="btn btn-primary btn-sm" href="/demo">Probar la demo</a>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="hero-map" id="heroMap" aria-hidden="true"></div>
+      <div class="hero-shade" aria-hidden="true"></div>
+      <div class="hero-inner">
+        <p class="eyebrow">Business Advanced Analytics · Sistema multiagente</p>
+        <h1>La huella física de cualquier empresa, geolocalizada y con fuente</h1>
+        <p class="lede">Nueve agentes especializados parten del nombre de una compañía y reconstruyen dónde opera realmente: plantas, oficinas, filiales y localizaciones visibles, separadas por capas y con la URL que respalda cada dato.</p>
+        <div class="hero-actions">
+          <a class="btn btn-primary btn-lg" href="/demo">Probar la demo</a>
+          <a class="btn btn-ghost btn-lg" href="#como-funciona">Cómo funciona</a>
+        </div>
+        <dl class="hero-stats" id="heroStats">
+          <div><dt>Empresas analizadas</dt><dd data-stat="cases">4</dd></div>
+          <div><dt>Localizaciones</dt><dd data-stat="locations">—</dd></div>
+          <div><dt>Países</dt><dd data-stat="countries">—</dd></div>
+          <div><dt>Con coordenadas</dt><dd data-stat="geo">—</dd></div>
+          <div><dt>Coste medio por empresa</dt><dd data-stat="cost">—</dd></div>
+        </dl>
+      </div>
+    </section>
+
+    <section class="band" id="reto">
+      <div class="wrap">
+        <p class="kicker">El reto</p>
+        <h2>La información existe, pero está repartida en pedazos</h2>
+        <p class="section-lede">Saber dónde opera de verdad una empresa exige cruzar fuentes que no se hablan entre sí. Encontrar datos no es lo difícil: lo difícil es clasificarlos, consolidarlos y poder demostrar de dónde sale cada uno.</p>
+        <div class="source-grid">
+          <article class="source-card"><span class="source-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 4v5"/></svg></span>
+            <h3>Webs corporativas e informes</h3><p>Páginas de presencia, informes anuales, notas de prensa y presentaciones a inversores.</p></article>
+          <article class="source-card"><span class="source-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M4 20V8l8-4 8 4v12"/><path d="M9 20v-6h6v6M4 20h16"/></svg></span>
+            <h3>Registros y directorios</h3><p>Identificadores legales, filiales, participadas y datos de registro dispersos entre jurisdicciones.</p></article>
+          <article class="source-card"><span class="source-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg></span>
+            <h3>Datasets sectoriales</h3><p>GEM Wiki para activos energéticos, Open Supply Hub para producción textil y otras bases por vertical.</p></article>
+          <article class="source-card"><span class="source-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg></span>
+            <h3>Mapas y Places</h3><p>Tiendas, oficinas y puntos visibles que nunca aparecen en un inventario corporativo formal.</p></article>
+        </div>
+        <div class="pain">
+          <div class="pain-item"><strong>Clasificar</strong><span>Una planta no es una oficina, y una filial no es una tienda.</span></div>
+          <div class="pain-item"><strong>Consolidar</strong><span>El mismo sitio aparece con tres nombres y dos direcciones.</span></div>
+          <div class="pain-item"><strong>Geolocalizar</strong><span>Direcciones parciales, genéricas o en formatos locales.</span></div>
+          <div class="pain-item"><strong>Justificar</strong><span>Sin la fuente de cada registro, el dato no se puede defender.</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="band band-dark" id="como-funciona">
+      <div class="wrap">
+        <p class="kicker kicker-light">Cómo funciona</p>
+        <h2 class="h2-light">Nueve agentes, tres capas, un inventario</h2>
+        <p class="section-lede lede-light">El flujo no crea «un agente por sector», sino «un agente por función». Un planificador decide qué fuentes mandan para cada empresa y el resto de agentes reutiliza esa estrategia.</p>
+        <div class="pipeline" id="pipeline"></div>
+        <div class="callout callout-light"><strong>Especialización sin multiplicar agentes.</strong> Para una eléctrica manda GEM Wiki; para un grupo textil, Open Supply Hub; para un retailer, Google Places. Cambian las fuentes que se priorizan, no la arquitectura.</div>
+      </div>
+    </section>
+
+    <section class="band band-soft">
+      <div class="wrap">
+        <p class="kicker">Qué entrega</p>
+        <h2>Seis capas en lugar de una lista plana</h2>
+        <p class="section-lede">Cada capa conserva su granularidad y su fuente, y todas se consolidan en una vista maestra deduplicada y geolocalizada, lista para exportar en JSON y CSV.</p>
+        <div class="layers-grid">
+          <article class="layer-card"><span class="layer-swatch layer-swatch-profile" aria-hidden="true"></span><h3>Perfil corporativo</h3><p>Razón social, matriz, marcas, filiales, países, identificadores públicos y códigos de actividad.</p></article>
+          <article class="layer-card"><span class="layer-swatch" data-layer="assets" aria-hidden="true"></span><h3>Activos físicos</h3><p>Plantas, fábricas, centros productivos, infraestructuras energéticas y hubs logísticos.</p></article>
+          <article class="layer-card"><span class="layer-swatch" data-layer="offices" aria-hidden="true"></span><h3>Oficinas corporativas</h3><p>Sede, oficinas regionales, administrativas y comerciales, sin mezclarlas con otros sitios.</p></article>
+          <article class="layer-card"><span class="layer-swatch" data-layer="entities" aria-hidden="true"></span><h3>Entidades operativas</h3><p>Filiales, joint ventures, terminales y operadores con evidencia de localización.</p></article>
+          <article class="layer-card"><span class="layer-swatch" data-layer="brand" aria-hidden="true"></span><h3>Localizaciones de marca</h3><p>Tiendas, showrooms y puntos de atención descubiertos en mapas y localizadores oficiales.</p></article>
+          <article class="layer-card"><span class="layer-swatch layer-swatch-geo" aria-hidden="true"></span><h3>Capa geoespacial</h3><p>Direcciones normalizadas, latitud y longitud, sistema de geocodificación y motivo si falla.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="band" id="resultados">
+      <div class="wrap">
+        <p class="kicker">Resultados</p>
+        <h2>Cuatro empresas, cuatro sectores, una misma arquitectura</h2>
+        <p class="section-lede">Aeroespacial, agroindustria, gran consumo y retail. Selecciona una empresa para ver su huella sobre el mapa.</p>
+        <div class="explorer">
+          <div class="explorer-tabs" id="explorerTabs" role="tablist" aria-label="Empresas"></div>
+          <div class="explorer-body">
+            <div class="explorer-map"><div class="map-canvas" id="explorerMap"></div></div>
+            <aside class="explorer-side" id="explorerSide"></aside>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="band band-impact">
+      <div class="wrap impact">
+        <div>
+          <p class="kicker">Cobertura</p>
+          <h2>Más activos que el scrapeo de la web oficial</h2>
+          <p class="section-lede">En un caso real del sector utilities, el flujo multiagente con GEM Wiki identificó muchos más activos físicos que el scrapeo manual de la web corporativa. El scrapeo manual, además, concentraba cerca del 90 % de sus activos en España.</p>
+          <p class="impact-note">Benchmark sobre Iberdrola. Indica un orden de magnitud de mejora, no un recall garantizado para cualquier empresa o sector.</p>
+        </div>
+        <div class="bench">
+          <div class="bench-row">
+            <span class="bench-label">Scrapeo manual de la web oficial</span>
+            <div class="bench-bar"><span style="--w: 64.7%"></span></div>
+            <strong>420</strong>
+          </div>
+          <div class="bench-row bench-row-strong">
+            <span class="bench-label">Flujo multiagente + GEM Wiki</span>
+            <div class="bench-bar"><span style="--w: 100%"></span></div>
+            <strong>649</strong>
+          </div>
+          <div class="bench-foot">
+            <div><b>+229</b><span>activos físicos</span></div>
+            <div><b>+54,5 %</b><span>de cobertura</span></div>
+            <div><b>~90 %</b><span>del scrapeo manual, en España</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="band band-soft" id="usos">
+      <div class="wrap">
+        <p class="kicker">Casos de uso</p>
+        <h2>Para qué sirve saber dónde opera una empresa</h2>
+        <div class="cards">
+          <article class="card"><p class="card-tag">KYC · EDD</p><h3>Due diligence reforzada</h3><p>Contrastar que la actividad declarada por un cliente empresa tiene presencia física real y coherente con su sector.</p></article>
+          <article class="card"><p class="card-tag">AML · TBML</p><h3>Contrapartes de comercio exterior</h3><p>Verificar que un exportador tiene capacidad productiva para lo que factura y detectar señales de sociedad pantalla.</p></article>
+          <article class="card"><p class="card-tag">Riesgos</p><h3>Exposición física y climática</h3><p>Ubicar plantas y activos críticos para evaluar concentración operativa y exposición a riesgos físicos.</p></article>
+          <article class="card"><p class="card-tag">Sanciones</p><h3>Jurisdicciones de riesgo</h3><p>Identificar filiales, terminales y activos en países sancionados o de alto riesgo dentro de la estructura del grupo.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="band band-tech" id="arquitectura">
+      <div class="wrap">
+        <p class="kicker">Arquitectura</p>
+        <h2>Cómo está construido</h2>
+        <div class="tech-grid">
+          <article class="tech-card">
+            <h3>Orquestación</h3>
+            <p>Flujo secuencial de nueve tareas en CrewAI. Cada agente se define por su rol, objetivo y contexto, y hereda los resultados de las tareas anteriores.</p>
+            <div class="chips-row"><span>CrewAI</span><span>gpt-4o-mini</span><span>Proceso secuencial</span></div>
+          </article>
+          <article class="tech-card">
+            <h3>Conectores</h3>
+            <p>Herramientas horizontales para web y búsqueda, conectores sectoriales y geocodificación, priorizadas según el plan de fuentes.</p>
+            <div class="chips-row"><span>Serper</span><span>Contenido web seguro</span><span>GEM Wiki</span><span>Open Supply Hub</span><span>Google Places</span><span>OpenStreetMap</span><span>ScrapeGraphAI</span></div>
+          </article>
+          <article class="tech-card">
+            <h3>Salida</h3>
+            <p>Seis datasets por capa más una vista maestra deduplicada, con URL de fuente, confianza y estado de geocodificación por registro.</p>
+            <div class="chips-row"><span>JSON</span><span>CSV</span><span>Informe de calidad</span><span>Coste por agente</span></div>
+          </article>
+        </div>
+        <h3 class="sub-h3">Evolución prevista</h3>
+        <div class="roadmap">
+          <div><strong>Orquestación con LangGraph</strong><span>Estado explícito, reintentos, ejecución en paralelo y puntos de revisión humana.</span></div>
+          <div><strong>Jerarquía corporativa</strong><span>APIs de propiedad y entidades (GLEIF, OpenCorporates, proveedores premium) para filiales y ownership.</span></div>
+          <div><strong>Conectores sectoriales</strong><span>Más datasets por vertical para mejorar la cobertura de activos productivos.</span></div>
+          <div><strong>Consulta conversacional</strong><span>Preguntar en lenguaje natural sobre la huella recopilada de una o varias empresas.</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="cta">
+      <div class="wrap cta-inner">
+        <div>
+          <h2>Del nombre de la empresa a su mapa de activos</h2>
+          <p>Elige una compañía, ejecuta los nueve agentes y explora su huella corporativa capa a capa.</p>
+        </div>
+        <a class="btn btn-primary btn-lg" href="/demo">Abrir la mesa de análisis</a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="wrap footer-inner">
+      <span>Address Tracker · Business Advanced Analytics</span>
+      <span>Cartografía © OpenStreetMap · OpenMapTiles · OpenFreeMap</span>
+    </div>
+  </footer>
+
+  <script src="/vendor/maplibre-gl.js"></script>
+  <script type="module" src="/assets/landing.js"></script>
+</body>
+</html>

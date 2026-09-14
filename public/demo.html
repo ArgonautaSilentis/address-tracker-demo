@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Address Tracker · Mesa de análisis</title>
+  <meta name="description" content="Mesa de análisis de Address Tracker: nueve agentes reconstruyen la huella corporativa y geolocalizada de una empresa.">
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/vendor/maplibre-gl.css">
+  <link rel="stylesheet" href="/assets/base.css">
+  <link rel="stylesheet" href="/assets/demo.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Address Tracker, portada">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="brand-copy"><strong>ADDRESS TRACKER</strong><span>HUELLA CORPORATIVA</span></span>
+    </a>
+    <div class="topbar-title"><span>Sistema multiagente</span><strong>Mesa de análisis</strong></div>
+    <div class="environment">
+      <a class="topbar-link" href="/">Portada</a>
+      <span class="service-state"><span class="service-dot" aria-hidden="true"></span>Servicio disponible</span>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <aside class="queue" aria-labelledby="queueTitle">
+      <div class="queue-heading">
+        <div>
+          <p class="eyebrow-dark">Bandeja</p>
+          <h2 id="queueTitle">Empresas</h2>
+        </div>
+        <span class="queue-count" id="queueCount">0</span>
+      </div>
+      <label class="queue-search">
+        <span class="sr-only">Buscar empresa</span>
+        <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="6"/><path d="m14 14 4 4"/></svg>
+        <input id="queueSearch" type="search" placeholder="Buscar empresa o sector" autocomplete="off">
+      </label>
+      <div class="queue-list" id="queueList" role="list"></div>
+      <div class="queue-foot">
+        <p class="eyebrow-dark">Capas de salida</p>
+        <ul class="legend" id="legendList"></ul>
+      </div>
+    </aside>
+
+    <section class="stage" aria-live="polite">
+      <section class="hero" id="hero">
+        <div class="hero-main">
+          <div class="hero-labels">
+            <span class="hero-chip" id="sectorChip">Sector</span>
+            <span class="hero-chip hero-chip-state" id="stateChip">Pendiente</span>
+          </div>
+          <p class="hero-kicker">Análisis de huella corporativa</p>
+          <h1 id="companyName">Empresa</h1>
+          <p class="hero-meta" id="companyMeta"></p>
+        </div>
+        <div class="hero-run">
+          <div class="run-top">
+            <div>
+              <span class="run-label">Progreso</span>
+              <strong class="run-step" id="runStep">9 agentes listos</strong>
+            </div>
+            <span class="run-clock" id="runClock">00:00</span>
+          </div>
+          <div class="run-bar" aria-hidden="true"><span id="runBar"></span></div>
+          <div class="run-actions">
+            <button class="btn btn-primary" id="runButton" type="button">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6 4.5v11l9-5.5z"/></svg>
+              <span id="runButtonText">Ejecutar análisis</span>
+            </button>
+            <div class="speed" role="group" aria-label="Velocidad de ejecución">
+              <button type="button" data-speed="1" class="is-active">1×</button>
+              <button type="button" data-speed="3">3×</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="kpis" aria-label="Indicadores de la ejecución">
+        <div class="kpi"><span class="kpi-value" id="kpiLocations">0</span><span class="kpi-label">Localizaciones</span></div>
+        <div class="kpi"><span class="kpi-value" id="kpiCountries">0</span><span class="kpi-label">Países</span></div>
+        <div class="kpi"><span class="kpi-value" id="kpiGeo">—</span><span class="kpi-label">Con coordenadas</span></div>
+        <div class="kpi"><span class="kpi-value" id="kpiSource">—</span><span class="kpi-label">Con URL de fuente</span></div>
+        <div class="kpi"><span class="kpi-value" id="kpiRequests">0</span><span class="kpi-label">Llamadas al modelo</span></div>
+        <div class="kpi"><span class="kpi-value" id="kpiTokens">0</span><span class="kpi-label">Tokens</span></div>
+        <div class="kpi"><span class="kpi-value" id="kpiCost">$0.000</span><span class="kpi-label">Coste estimado</span></div>
+      </section>
+
+      <div class="grid">
+        <section class="panel flow" aria-labelledby="flowTitle">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow-dark">01 · Orquestación</p>
+              <h2 id="flowTitle">Flujo de agentes</h2>
+            </div>
+            <span class="panel-note">Proceso secuencial · gpt-4o-mini</span>
+          </div>
+          <div class="flow-list" id="flowList"></div>
+        </section>
+
+        <section class="panel map-panel" aria-labelledby="mapTitle">
+          <div class="panel-heading map-heading">
+            <div>
+              <p class="eyebrow-dark">02 · Huella geolocalizada</p>
+              <h2 id="mapTitle">Mapa de localizaciones</h2>
+            </div>
+            <div class="map-tools">
+              <div class="segmented" role="group" aria-label="Proyección">
+                <button type="button" data-projection="globe" class="is-active">Globo</button>
+                <button type="button" data-projection="flat">Plano</button>
+              </div>
+              <div class="segmented" role="group" aria-label="Estilo del mapa">
+                <button type="button" data-theme="dark" class="is-active">Oscuro</button>
+                <button type="button" data-theme="light">Claro</button>
+              </div>
+              <button type="button" class="icon-btn" id="fitButton" title="Encuadrar la huella" aria-label="Encuadrar la huella">
+                <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 7V3h4M13 3h4v4M17 13v4h-4M7 17H3v-4"/></svg>
+              </button>
+            </div>
+          </div>
+          <div class="layer-toggles" id="layerToggles"></div>
+          <div class="map-wrap">
+            <div class="map-canvas" id="map"></div>
+            <div class="map-empty" id="mapEmpty">
+              <span class="map-empty-dot" aria-hidden="true"></span>
+              <p>Las localizaciones aparecerán en el mapa a medida que cada agente termine su tarea.</p>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <section class="panel results" aria-labelledby="resultsTitle">
+        <div class="panel-heading results-heading">
+          <div>
+            <p class="eyebrow-dark">03 · Resultado</p>
+            <h2 id="resultsTitle">Dataset consolidado</h2>
+          </div>
+          <div class="tabs" role="tablist" aria-label="Vistas del resultado">
+            <button type="button" role="tab" data-tab="inventory" class="is-active" aria-selected="true">Inventario</button>
+            <button type="button" role="tab" data-tab="profile" aria-selected="false">Perfil corporativo</button>
+            <button type="button" role="tab" data-tab="strategy" aria-selected="false">Estrategia de fuentes</button>
+            <button type="button" role="tab" data-tab="export" aria-selected="false">Exportar</button>
+          </div>
+        </div>
+        <div class="results-locked" id="resultsLocked">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>
+          <p><strong>Sin resultados todavía.</strong> Ejecuta el análisis para construir el inventario, el perfil y la estrategia de fuentes de la empresa.</p>
+        </div>
+        <div class="tab-body" id="tabInventory" data-panel="inventory" hidden>
+          <div class="inventory-tools">
+            <label class="inventory-search">
+              <span class="sr-only">Filtrar localizaciones</span>
+              <input id="inventorySearch" type="search" placeholder="Filtrar por nombre, tipo, ciudad o país" autocomplete="off">
+            </label>
+            <select id="inventoryLayer" aria-label="Capa">
+              <option value="">Todas las capas</option>
+            </select>
+            <span class="inventory-count" id="inventoryCount"></span>
+          </div>
+          <div class="table-wrap">
+            <table class="inventory">
+              <thead>
+                <tr><th>Capa</th><th>Nombre</th><th>Tipo</th><th>Ubicación</th><th>Estado</th><th>Fuente</th></tr>
+              </thead>
+              <tbody id="inventoryBody"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="tab-body" id="tabProfile" data-panel="profile" hidden></div>
+        <div class="tab-body" id="tabStrategy" data-panel="strategy" hidden></div>
+        <div class="tab-body" id="tabExport" data-panel="export" hidden></div>
+      </section>
+    </section>
+  </main>
+
+  <div class="toast-region" id="toastRegion" aria-live="polite"></div>
+
+  <script src="/vendor/maplibre-gl.js"></script>
+  <script type="module" src="/assets/demo.js"></script>
+</body>
+</html>
