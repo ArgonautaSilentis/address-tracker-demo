@@ -39,11 +39,11 @@
           <a class="btn btn-ghost btn-lg" href="#como-funciona">Cómo funciona</a>
         </div>
         <dl class="hero-stats" id="heroStats">
-          <div><dt>Empresas analizadas</dt><dd data-stat="cases">4</dd></div>
+          <div><dt>Empresas analizadas</dt><dd data-stat="cases">—</dd></div>
           <div><dt>Localizaciones</dt><dd data-stat="locations">—</dd></div>
           <div><dt>Países</dt><dd data-stat="countries">—</dd></div>
           <div><dt>Con coordenadas</dt><dd data-stat="geo">—</dd></div>
-          <div><dt>Coste medio por empresa</dt><dd data-stat="cost">—</dd></div>
+          <div><dt>Coste LLM medio por empresa</dt><dd data-stat="cost">—</dd></div>
         </dl>
       </div>
     </section>
@@ -105,14 +105,48 @@
     <section class="band" id="resultados">
       <div class="wrap">
         <p class="kicker">Resultados</p>
-        <h2>Cuatro empresas, cuatro sectores, una misma arquitectura</h2>
-        <p class="section-lede">Aeroespacial, agroindustria, gran consumo y retail. Selecciona una empresa para ver su huella sobre el mapa.</p>
+        <h2>Empresas reales de sectores distintos, una misma arquitectura</h2>
+        <p class="section-lede">Aeroespacial, agroindustria, gran consumo, retail, hidrógeno, energía y materias primas. Selecciona una empresa para ver su huella sobre el mapa.</p>
         <div class="explorer">
           <div class="explorer-tabs" id="explorerTabs" role="tablist" aria-label="Empresas"></div>
           <div class="explorer-body">
             <div class="explorer-map"><div class="map-canvas" id="explorerMap"></div></div>
             <aside class="explorer-side" id="explorerSide"></aside>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="band band-dark" id="conectores">
+      <div class="wrap">
+        <p class="kicker kicker-light">Conectores sectoriales</p>
+        <h2 class="h2-light">De decenas de localizaciones a miles</h2>
+        <p class="section-lede lede-light">Los agentes construyen el perfil y la estrategia; los conectores sectoriales multiplican la cobertura con datos estructurados, sin perder la fuente de cada registro.</p>
+        <div class="connector-cases">
+          <article class="connector-case">
+            <p class="connector-kicker">Utilities y energía</p>
+            <h3>Iberdrola</h3>
+            <p class="connector-big"><span data-stat="ib-locations">—</span><small>localizaciones en <span data-stat="ib-countries">—</span> países</small></p>
+            <ul class="connector-list">
+              <li><span class="layer-dot" data-layer="charging"></span><b data-stat="ib-charging">—</b> puntos de la red de recarga</li>
+              <li><span class="layer-dot" data-layer="assets"></span><b data-stat="ib-assets">—</b> activos productivos del grupo, con GEM Wiki</li>
+              <li><span class="layer-dot" data-layer="offices"></span><b data-stat="ib-offices">—</b> sedes y oficinas de la web oficial</li>
+            </ul>
+            <p class="connector-note">Los activos con otro titular en GEM Wiki se separan en una capa propia en lugar de atribuirse al grupo.</p>
+            <a class="btn btn-primary btn-sm" href="/demo?empresa=iberdrola">Analizar Iberdrola →</a>
+          </article>
+          <article class="connector-case">
+            <p class="connector-kicker">Materias primas</p>
+            <h3>Glencore</h3>
+            <p class="connector-big"><span data-stat="gl-entities">—</span><small>entidades del grupo · huella en <span data-stat="gl-countries">—</span> países</small></p>
+            <ul class="connector-list">
+              <li><span class="layer-dot" data-layer="entities"></span>Domicilios registrados de cada entidad, geocodificados</li>
+              <li><span class="layer-dot" data-layer="assets"></span><b data-stat="gl-assets">—</b> minas, centrales, terminales y gasoductos</li>
+              <li><span class="layer-dot" data-layer="other"></span>Presencia en jurisdicciones como Bermudas o Islas Vírgenes Británicas</li>
+            </ul>
+            <p class="connector-note">Para AML, la estructura societaria sobre el mapa hace visibles los domicilios compartidos y las jurisdicciones de riesgo.</p>
+            <a class="btn btn-primary btn-sm" href="/demo?empresa=glencore">Analizar Glencore →</a>
+          </article>
         </div>
       </div>
     </section>

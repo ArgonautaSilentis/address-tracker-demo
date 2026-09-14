@@ -1,11 +1,19 @@
 """Convierte las ejecuciones del flujo V4 en los datos que consume la web.
 
-Lee, por cada empresa, las salidas de las nueve tareas, el resumen de costes y la
-vista maestra de localizaciones (`csv_exports/all_locations_master.csv`), y
-escribe `public/data/cases.json`.
+Hay dos tipos de empresa:
+
+- Flujo completo: las nueve tareas, el resumen de costes y la vista maestra
+  (`csv_exports/all_locations_master.csv`) de una misma ejecución.
+- Flujo con conectores sectoriales: las tareas del flujo que existen para la
+  empresa, más los datasets que aportan los conectores (GEM Wiki, webs oficiales,
+  red de recarga, registro de entidades del grupo). Esas ejecuciones no guardaron
+  resumen de costes, así que no se muestran tokens ni coste.
+
+Escribe `public/data/index.json` (resumen de cada empresa) y
+`public/data/cases/<empresa>.json` (detalle con todas las localizaciones).
 
 Uso:
-    python3 scripts/build_data.py [ruta/a/V4/outputs/runs]
+    python3 scripts/build_data.py [ruta/a/V4/outputs]
 """
 
 from __future__ import annotations
@@ -16,19 +24,24 @@ import os
 import re
 import sys
 import unicodedata
+from collections import Counter
+from urllib.parse import urlparse
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DEFAULT_RUNS = os.path.expanduser(
-    "~/Library/CloudStorage/OneDrive-NTTDATAEMEAL/Documentos/Optimized_flujo_PoC_SAN/V4/outputs/runs")
+DEFAULT_OUTPUTS = os.path.expanduser(
+    "~/Library/CloudStorage/OneDrive-NTTDATAEMEAL/Documentos/Optimized_flujo_PoC_SAN/V4/outputs")
 
+# (slug, ejecución del flujo, ejecución de la que tomar el plan si falta, conectores)
 CASES = [
-    ("airbus", "20260413_104810_Airbus"),
-    ("aceitera-general-deheza", "20260413_123311_Aceitera_General_Deheza"),
-    ("unilever", "20260413_102236_Unilever"),
-    ("ikea", "20260504_135137_Ikea"),
+    ("airbus", "20260413_104810_Airbus", None, None),
+    ("aceitera-general-deheza", "20260413_123311_Aceitera_General_Deheza", None, None),
+    ("unilever", "20260413_102236_Unilever", None, None),
+    ("ikea", "20260504_135137_Ikea", None, None),
+    ("john-cockerill", "20260413_111328_John_Cockerill_Netherland", None, None),
+    ("iberdrola", "20260324_114759_Iberdrola", "20260409_171137_Iberdrola", "iberdrola"),
+    ("glencore", "20260409_171633_Glencore", None, "glencore"),
 ]
 
-# Orden de ejecución del flujo secuencial (crew.py) y su presentación.
 PIPELINE = [
     {"task": "plan_source_strategy", "agent": "Source Strategy Planner", "stage": "plan",
      "label": "Planificación de fuentes", "tools": []},
@@ -57,28 +70,34 @@ PIPELINE = [
 ]
 
 LAYER_BY_SUFFIX = [
-    ("_physical_assets", "assets"),
-    ("_global_offices", "offices"),
-    ("_operational_entities", "entities"),
-    ("_brand_locations_discovered", "brand"),
-    ("_geocoded_locations", "other"),
+    ("_physical_assets", "assets"), ("_global_offices", "offices"), ("_operational_entities", "entities"),
+    ("_brand_locations_discovered", "brand"), ("_geocoded_locations", "other"),
 ]
+STEP_BY_LAYER = {"assets": "hunt_all_company_assets", "offices": "map_all_global_offices",
+                 "entities": "map_operational_entities", "brand": "discover_brand_locations",
+                 "other": "geocode_all_locations"}
 
-SECTORS = {
-    "manufacturing/industrial": "Industria y manufactura",
-    "retail": "Retail",
-    "utilities/energy": "Utilities y energía",
-    "consumer goods": "Gran consumo",
-    "agribusiness": "Agroindustria",
-}
+SECTORS = {"manufacturing/industrial": "Industria y manufactura", "retail": "Retail",
+           "utilities/energy": "Utilities y energía", "consumer goods": "Gran consumo", "agribusiness": "Agroindustria"}
 CONFIDENCE = {"high": "alta", "medium": "media", "low": "baja"}
-CONNECTORS = {
-    "official_website": "Web oficial", "official website": "Web oficial", "official websites": "Web oficial",
-    "gem": "GEM Wiki", "google places": "Google Places", "open supply hub": "Open Supply Hub",
-    "advanced_scraping": "Scraping avanzado", "advanced scraping": "Scraping avanzado",
-    "serper": "Búsqueda web", "web_search": "Búsqueda web", "web search": "Búsqueda web",
-}
+CONNECTORS = {"official_website": "Web oficial", "official website": "Web oficial", "gem": "GEM Wiki",
+              "google places": "Google Places", "open supply hub": "Open Supply Hub",
+              "advanced_scraping": "Scraping avanzado", "advanced scraping": "Scraping avanzado"}
+STATUS = {"active": "Operativo", "operational": "Operativo", "operating": "Operativo", "open": "Operativo",
+          "in operation": "Operativo", "construction": "En construcción", "under construction": "En construcción",
+          "planned": "Planificado", "announced": "Anunciado", "closed": "Cerrado", "inactive": "Inactivo",
+          "cancelled": "Cancelado", "shelved": "Paralizado", "retired": "Retirado", "partial": "Parcial",
+          "mothballed": "En reserva"}
+COUNTRIES_ES = {"Spain": "España", "United States": "EE. UU.", "United Kingdom": "Reino Unido", "Brazil": "Brasil",
+                "Mexico": "México", "Australia": "Australia", "Switzerland": "Suiza", "Canada": "Canadá",
+                "Bermuda": "Bermudas", "South Africa": "Sudáfrica", "British Virgin Islands": "Islas Vírgenes Británicas",
+                "Singapore": "Singapur", "Colombia": "Colombia", "Peru": "Perú", "Chile": "Chile",
+                "Portugal": "Portugal", "Germany": "Alemania", "France": "Francia", "Italy": "Italia",
+                "Netherlands": "Países Bajos", "Hungary": "Hungría", "Belgium": "Bélgica", "China": "China",
+                "India": "India"}
 
+
+# --------------------------------------------------------------------------- utilidades
 
 def load(run, task):
     path = os.path.join(run, task + ".json")
@@ -98,10 +117,11 @@ def load(run, task):
 
 def records(parsed):
     if isinstance(parsed, dict):
-        return parsed.get("records") or []
-    if isinstance(parsed, list):
-        return parsed
-    return []
+        if parsed.get("records"):
+            return parsed["records"]
+        lists = [v for k, v in parsed.items() if k.endswith("records") and isinstance(v, list)]
+        return lists[0] if lists else []
+    return parsed if isinstance(parsed, list) else []
 
 
 def clean(value):
@@ -111,9 +131,27 @@ def clean(value):
     return "" if text.lower() in ("none", "null", "n/a", "not available", "nan") else text
 
 
+def flat(value):
+    if isinstance(value, (list, tuple)):
+        return ", ".join(clean(v) for v in value if clean(v))
+    return clean(value)
+
+
 def key(text):
     text = unicodedata.normalize("NFKD", clean(text)).encode("ascii", "ignore").decode().lower()
     return re.sub(r"[^a-z0-9]+", " ", text).strip()
+
+
+def number(n):
+    return f"{n:,}".replace(",", ".")
+
+
+def plural(n, one, many):
+    return "%s %s" % (number(n), one if n == 1 else many)
+
+
+def country_es(name):
+    return COUNTRIES_ES.get(name, name)
 
 
 def connector(name):
@@ -136,23 +174,7 @@ def sector_label(raw):
     return clean(raw).replace("/", " / ").capitalize()
 
 
-def plural(n, one, many):
-    return "%d %s" % (n, one if n == 1 else many)
-
-
-def flat(value):
-    if isinstance(value, (list, tuple)):
-        return ", ".join(clean(v) for v in value if clean(v))
-    return clean(value)
-
-
-STATUS = {"active": "Operativo", "operational": "Operativo", "operating": "Operativo", "open": "Operativo",
-          "in operation": "Operativo", "construction": "En construcción", "under construction": "En construcción",
-          "planned": "Planificado", "announced": "Anunciado", "closed": "Cerrado", "inactive": "Inactivo"}
-
-
 def status_label(raw):
-    # Solo estados operativos reconocibles: la columna de origen mezcla estados de geocodificación y relaciones.
     return STATUS.get(clean(raw).lower(), "")
 
 
@@ -160,194 +182,448 @@ def place(city, country):
     return ", ".join(x for x in (clean(city), clean(country)) if x)
 
 
-def build_case(slug, run_id, runs_dir):
-    run = os.path.join(runs_dir, run_id)
-    out = {task["task"]: load(run, task["task"]) for task in PIPELINE}
-    export = out["export_consolidated_data"] or {}
-    datasets = export.get("datasets", export) if isinstance(export, dict) else {}
+def to_float(value):
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return None
+    return result if result == result else None
 
-    plan = out["plan_source_strategy"] or {}
-    profile = out["research_company_profile"]
-    if not isinstance(profile, dict):
-        profile = next((v for k, v in datasets.items() if k.endswith("_company_profile") and isinstance(v, dict)), {})
 
-    cost = json.load(open(os.path.join(run, "cost_summary.json"), encoding="utf-8"))
-    cost_by_agent = {a["agent_name"]: a for a in cost["by_agent"]}
+def compact(loc):
+    """Quita los campos vacíos: con miles de puntos de recarga, el JSON adelgaza mucho."""
+    return {k: v for k, v in loc.items() if v not in ("", None) or k in ("lat", "lon")}
 
-    # Vista maestra deduplicada, con la capa de origen y la fuente de cada registro.
-    master = list(csv.DictReader(open(os.path.join(run, "csv_exports", "all_locations_master.csv"),
-                                      encoding="utf-8-sig")))
-    details = {}
-    for rec in records(out["enrich_physical_assets"]) or records(out["hunt_all_company_assets"]):
-        details[("assets", key(rec.get("asset_name")))] = {
-            "detail": clean(rec.get("technical_or_business_details")), "subtype": clean(rec.get("asset_subtype")),
-            "validation": clean(rec.get("validation_status"))}
-    for rec in records(out["map_all_global_offices"]):
-        details[("offices", key(rec.get("office_name")))] = {
-            "detail": clean(rec.get("operational_functions")), "scope": clean(rec.get("regional_scope")),
-            "website": clean(rec.get("website"))}
-    for rec in records(out["map_operational_entities"]):
-        details[("entities", key(rec.get("entity_name")))] = {
-            "detail": clean(rec.get("operational_role")), "relationship": clean(rec.get("relationship_to_company")),
-            "website": clean(rec.get("website"))}
-    for rec in records(out["discover_brand_locations"]):
-        details[("brand", key(rec.get("location_name")))] = {
-            "detail": clean(rec.get("discovery_notes")), "system": clean(rec.get("discovery_source_system")),
-            "agreement": clean(rec.get("source_agreement_status"))}
 
-    locations = []
-    for index, row in enumerate(master):
-        layer = next((lay for suffix, lay in LAYER_BY_SUFFIX if row["source_dataset"].endswith(suffix)), "other")
-        try:
-            lat, lon = float(row["latitude"]), float(row["longitude"])
-        except ValueError:
-            lat = lon = None
-        extra = details.get((layer, key(row["name"])), {})
-        locations.append({
-            "id": "%s-%02d" % (slug, index + 1), "layer": layer, "name": clean(row["name"]),
-            "type": clean(row["type"]), "address": clean(row["address"]), "city": clean(row["city"]),
-            "region": clean(row["region"]), "country": clean(row["country"]), "postalCode": clean(row["postal_code"]),
-            "lat": lat, "lon": lon, "status": status_label(row["status"]),
-            "confidence": "" if clean(row["confidence"]).startswith("geocoded_") else clean(row["confidence"]),
-            "sourceUrl": clean(row["source_url"]), **{k: v for k, v in extra.items() if v},
-        })
+def host(url):
+    try:
+        return urlparse(url).netloc.replace("www.", "")
+    except ValueError:
+        return ""
 
-    # Registros que produce cada tarea, para ir apareciendo en el mapa según avanza el flujo.
-    reveal = {"hunt_all_company_assets": [], "map_all_global_offices": [], "map_operational_entities": [],
-              "discover_brand_locations": [], "enrich_physical_assets": [], "geocode_all_locations": []}
-    hunt_keys = {key(r.get("asset_name")) for r in records(out["hunt_all_company_assets"])}
-    for loc in locations:
-        if loc["layer"] == "assets":
-            target = "hunt_all_company_assets" if key(loc["name"]) in hunt_keys else "enrich_physical_assets"
-        else:
-            target = {"offices": "map_all_global_offices", "entities": "map_operational_entities",
-                      "brand": "discover_brand_locations", "other": "geocode_all_locations"}[loc["layer"]]
-        reveal[target].append(loc["id"])
-    if not reveal["hunt_all_company_assets"] and reveal["enrich_physical_assets"]:
-        half = max(1, len(reveal["enrich_physical_assets"]) // 2)
-        reveal["hunt_all_company_assets"] = reveal["enrich_physical_assets"][:half]
-        reveal["enrich_physical_assets"] = reveal["enrich_physical_assets"][half:]
 
-    # Registro de actividad de cada agente, construido a partir de su salida.
-    name = clean(profile.get("canonical_company_name")) or run_id.split("_", 2)[2].replace("_", " ")
+def top(counter, n=5, translate=False):
+    return " · ".join("%s %s" % (country_es(k) if translate else k, number(v)) for k, v in counter.most_common(n))
+
+
+# --------------------------------------------------------------------------- tareas del flujo
+
+def record_lines(recs, name_field, extra_fields, noun_one, noun_many, feminine=False, limit=7):
+    verb = ("identificada" if len(recs) == 1 else "identificadas") if feminine else (
+        "identificado" if len(recs) == 1 else "identificados")
+    result = ["%s %s" % (plural(len(recs), noun_one, noun_many), verb)]
+    for rec in recs[:limit]:
+        city = rec.get("location_city") or rec.get("city")
+        country = rec.get("location_country") or rec.get("country")
+        extra = next((clean(rec.get(f)) for f in extra_fields if clean(rec.get(f))), "")
+        result.append("%s · %s%s" % (clean(rec.get(name_field)), place(city, country) or "ubicación por confirmar",
+                                     (" · " + extra) if extra else ""))
+    if len(recs) > limit:
+        result.append("… y %s más" % plural(len(recs) - limit, "registro", "registros"))
+    return result
+
+
+def flow_logs(out, plan, profile, name):
     logs = {}
     order = [connector(c) for c in plan.get("preferred_connector_order") or []]
-    lines = ["Sector operativo: %s · confianza %s" % (sector_label(plan.get("workflow_sector")),
-                                                       CONFIDENCE.get(clean(plan.get("confidence")).lower(),
-                                                                      clean(plan.get("confidence"))))]
-    if order:
-        lines.append("Orden de conectores: " + " → ".join(order))
-    for field, label in (("corporate_profile_strategy", "Perfil corporativo"), ("physical_assets_strategy", "Activos físicos"),
-                         ("visible_locations_strategy", "Localizaciones visibles")):
-        strategy = plan.get(field) or {}
-        lead = strategy.get("lead_source") or strategy.get("primary_source")
-        if lead:
-            lines.append("%s: lidera %s" % (label, connector(lead)))
-    queries = (plan.get("recommended_brand_queries") or [])[:3]
-    if queries:
-        lines.append("Consultas de marca: " + " · ".join("«%s»" % q for q in queries))
-    lines.append("Estrategia enviada al resto de agentes")
-    logs["plan_source_strategy"] = lines
+    if plan:
+        lines = ["Sector operativo: %s · confianza %s" % (sector_label(plan.get("workflow_sector")),
+                                                           CONFIDENCE.get(clean(plan.get("confidence")).lower(),
+                                                                          clean(plan.get("confidence"))))]
+        if order:
+            lines.append("Orden de conectores: " + " → ".join(order))
+        for field, label in (("corporate_profile_strategy", "Perfil corporativo"),
+                             ("physical_assets_strategy", "Activos físicos"),
+                             ("visible_locations_strategy", "Localizaciones visibles")):
+            strategy = plan.get(field) or {}
+            lead = strategy.get("lead_source") or strategy.get("primary_source")
+            if lead:
+                lines.append("%s: lidera %s" % (label, connector(lead)))
+        queries = (plan.get("recommended_brand_queries") or [])[:3]
+        if queries:
+            lines.append("Consultas de marca: " + " · ".join("«%s»" % q for q in queries))
+        lines.append("Estrategia enviada al resto de agentes")
+        logs["plan_source_strategy"] = lines
 
     ids = profile.get("public_company_identifiers") or {}
     codes = profile.get("economic_activity_codes") or {}
     lines = ["Razón social: " + name, "Sede: " + clean(profile.get("headquarters"))]
     lines.append("%s · %s · %s" % (plural(len(profile.get("brand_names") or []), "marca", "marcas"),
-                                    plural(len(profile.get("major_subsidiaries") or []), "filial principal", "filiales principales"),
+                                    plural(len(profile.get("major_subsidiaries") or []), "filial principal",
+                                           "filiales principales"),
                                     plural(len(profile.get("countries_of_operation") or []), "país", "países")))
-    ident = [("%s %s" % (k.replace("_", " "), flat(v))) for k, v in ids.items() if flat(v)]
+    ident = ["%s %s" % (k.replace("_", " "), flat(v)) for k, v in ids.items() if flat(v)]
     if ident:
         lines.append("Identificadores: " + " · ".join(ident[:3]))
-    act = [("%s %s" % (k.replace("_", " "), flat(v))) for k, v in codes.items() if flat(v)]
+    act = ["%s %s" % (k.replace("_", " "), flat(v)) for k, v in codes.items() if flat(v)]
     if act:
         lines.append("Actividad: " + " · ".join(act[:3]))
     lines.append("Perfil verificado contra %s" % plural(len(profile.get("source_urls") or []), "fuente", "fuentes"))
     logs["research_company_profile"] = lines
 
-    def record_lines(task, name_field, extra_fields, noun_one, noun_many, feminine=False):
-        recs = records(out[task])
-        verb = ("identificada" if len(recs) == 1 else "identificadas") if feminine else (
-            "identificado" if len(recs) == 1 else "identificados")
-        result = ["%s %s" % (plural(len(recs), noun_one, noun_many), verb)]
-        for rec in recs[:7]:
-            city = rec.get("location_city") or rec.get("city")
-            country = rec.get("location_country") or rec.get("country")
-            extra = next((clean(rec.get(f)) for f in extra_fields if clean(rec.get(f))), "")
-            result.append("%s · %s%s" % (clean(rec.get(name_field)), place(city, country) or "ubicación por confirmar",
-                                         (" · " + extra) if extra else ""))
-        if len(recs) > 7:
-            result.append("… y %s más" % plural(len(recs) - 7, "registro", "registros"))
-        return result
-
-    logs["hunt_all_company_assets"] = record_lines("hunt_all_company_assets", "asset_name", ["asset_type"],
-                                                   "activo físico", "activos físicos")
-    logs["map_all_global_offices"] = record_lines("map_all_global_offices", "office_name", ["office_type"],
-                                                  "oficina", "oficinas", feminine=True)
-    logs["map_operational_entities"] = record_lines("map_operational_entities", "entity_name",
+    logs["hunt_all_company_assets"] = record_lines(records(out["hunt_all_company_assets"]), "asset_name",
+                                                   ["asset_type"], "activo físico", "activos físicos")
+    logs["map_all_global_offices"] = record_lines(records(out["map_all_global_offices"]), "office_name",
+                                                  ["office_type"], "oficina", "oficinas", feminine=True)
+    logs["map_operational_entities"] = record_lines(records(out["map_operational_entities"]), "entity_name",
                                                     ["relationship_to_company", "entity_type"],
                                                     "entidad operativa", "entidades operativas", feminine=True)
     brand = records(out["discover_brand_locations"])
-    systems = {}
-    for rec in brand:
-        system = clean(rec.get("discovery_source_system")) or "web"
-        systems[system] = systems.get(system, 0) + 1
-    lines = record_lines("discover_brand_locations", "location_name", ["location_type"],
-                         "localización visible", "localizaciones visibles", feminine=True)
+    lines = record_lines(brand, "location_name", ["location_type"], "localización visible",
+                         "localizaciones visibles", feminine=True)
+    systems = Counter(clean(r.get("discovery_source_system")) or "web" for r in brand)
     if systems:
-        lines.insert(1, "Origen: " + " · ".join("%s %d" % (k, v) for k, v in sorted(systems.items(), key=lambda x: -x[1])))
+        lines.insert(1, "Origen: " + top(systems, 3))
     logs["discover_brand_locations"] = lines
+
     hunted = len(records(out["hunt_all_company_assets"]))
     enriched = records(out["enrich_physical_assets"])
     lines = ["Inventario de activos: %d → %d registros" % (hunted, len(enriched))]
-    statuses = {}
-    for rec in enriched:
-        s = clean(rec.get("validation_status")) or "sin estado"
-        statuses[s] = statuses.get(s, 0) + 1
+    statuses = Counter(clean(r.get("validation_status")) or "sin estado" for r in enriched)
     if statuses:
-        lines.append("Validación: " + " · ".join("%s %d" % (k, v) for k, v in statuses.items()))
+        lines.append("Validación: " + top(statuses, 3))
     for rec in enriched[:5]:
         lines.append("%s · %s" % (clean(rec.get("asset_name")), clean(rec.get("asset_subtype")) or clean(rec.get("asset_type"))))
     logs["enrich_physical_assets"] = lines
+
     geo = records(out["geocode_all_locations"])
-    ok = [r for r in geo if clean(r.get("geocoding_status")).lower() in ("success", "geocoded", "ok", "succeeded", "already_geocoded", "preserved")]
-    sources = {}
-    for rec in geo:
-        s = clean(rec.get("geocoding_source_system")) or clean(rec.get("geocoding_source")) or "—"
-        sources[s] = sources.get(s, 0) + 1
+    sources = Counter(clean(r.get("geocoding_source_system")) or clean(r.get("geocoding_source")) or "—" for r in geo)
     lines = ["%s procesados" % plural(len(geo), "registro", "registros").capitalize()]
     if sources:
-        lines.append("Fuentes: " + " · ".join("%s %d" % (k, v) for k, v in sorted(sources.items(), key=lambda x: -x[1])[:3]))
+        lines.append("Fuentes: " + top(sources, 3))
     for rec in geo[:5]:
-        if rec.get("latitude") is not None:
+        if to_float(rec.get("latitude")) is not None:
             lines.append("%s → %.4f, %.4f" % (clean(rec.get("source_record_name")), rec["latitude"], rec["longitude"]))
     logs["geocode_all_locations"] = lines
+    return logs, order
+
+
+def layer_details(out):
+    details = {}
+    for rec in records(out["enrich_physical_assets"]) or records(out["hunt_all_company_assets"]):
+        details[("assets", key(rec.get("asset_name")))] = {
+            "detail": clean(rec.get("technical_or_business_details")), "subtype": clean(rec.get("asset_subtype")),
+            "sourceUrl": clean(rec.get("source_url")), "type": clean(rec.get("asset_type"))}
+    for rec in records(out["map_all_global_offices"]):
+        details[("offices", key(rec.get("office_name")))] = {
+            "detail": clean(rec.get("operational_functions")), "sourceUrl": clean(rec.get("source_url")),
+            "type": clean(rec.get("office_type"))}
+    for rec in records(out["map_operational_entities"]):
+        details[("entities", key(rec.get("entity_name")))] = {
+            "detail": clean(rec.get("operational_role")), "relationship": clean(rec.get("relationship_to_company")),
+            "sourceUrl": clean(rec.get("source_url")), "type": clean(rec.get("entity_type"))}
+    for rec in records(out["discover_brand_locations"]):
+        details[("brand", key(rec.get("location_name")))] = {
+            "detail": clean(rec.get("discovery_notes")), "system": clean(rec.get("discovery_source_system")),
+            "sourceUrl": clean(rec.get("source_url")), "type": clean(rec.get("location_type"))}
+    return details
+
+
+def flow_locations(run, out):
+    """Localizaciones del flujo: la vista maestra si existe; si no, los registros geocodificados."""
+    details = layer_details(out)
+    geo = {key(r.get("source_record_name")): r for r in records(out["geocode_all_locations"])
+           if to_float(r.get("latitude")) is not None}
+    master_path = os.path.join(run, "csv_exports", "all_locations_master.csv")
+    rows = []
+    if os.path.exists(master_path):
+        for row in csv.DictReader(open(master_path, encoding="utf-8-sig")):
+            layer = next((lay for suffix, lay in LAYER_BY_SUFFIX if row["source_dataset"].endswith(suffix)), "other")
+            rows.append({"layer": layer, "name": clean(row["name"]), "type": clean(row["type"]),
+                         "address": clean(row["address"]), "city": clean(row["city"]), "region": clean(row["region"]),
+                         "country": clean(row["country"]), "postalCode": clean(row["postal_code"]),
+                         "lat": to_float(row["latitude"]), "lon": to_float(row["longitude"]),
+                         "status": status_label(row["status"]),
+                         "confidence": "" if clean(row["confidence"]).startswith("geocoded_") else clean(row["confidence"]),
+                         "sourceUrl": clean(row["source_url"])})
+    else:
+        by_name = {}
+        for (lay, name_key) in details:
+            by_name.setdefault(name_key, lay)
+        seen_geo = set()
+        for rec in records(out["geocode_all_locations"]):
+            dataset = clean(rec.get("source_dataset")).lower()
+            name_key = key(rec.get("source_record_name"))
+            if (name_key, rec.get("latitude")) in seen_geo:
+                continue
+            seen_geo.add((name_key, rec.get("latitude")))
+            layer = by_name.get(name_key) or (
+                "assets" if any(w in dataset for w in ("physical", "asset", "operation")) else
+                "offices" if "office" in dataset else "entities" if "entit" in dataset else
+                "brand" if "brand" in dataset else "other")
+            rows.append({"layer": layer, "name": clean(rec.get("source_record_name")),
+                         "address": clean(rec.get("normalized_address")), "city": clean(rec.get("city")),
+                         "region": clean(rec.get("region")), "country": clean(rec.get("country")),
+                         "postalCode": clean(rec.get("postal_code")), "lat": to_float(rec.get("latitude")),
+                         "lon": to_float(rec.get("longitude"))})
+
+    # Completa coordenadas con la salida del geocodificador y quita los duplicados que deja la capa «otras».
+    for row in rows:
+        if row["lat"] is None and key(row["name"]) in geo:
+            g = geo[key(row["name"])]
+            row["lat"], row["lon"] = to_float(g["latitude"]), to_float(g["longitude"])
+    named = {key(r["name"]) for r in rows if r["layer"] != "other"}
+    rows = [r for r in rows if not (r["layer"] == "other" and key(r["name"]) in named)]
+
+    hunt_keys = {key(r.get("asset_name")) for r in records(out["hunt_all_company_assets"])}
+    has_enrich = out["enrich_physical_assets"] is not None
+    locations = []
+    for row in rows:
+        extra = details.get((row["layer"], key(row["name"])), {})
+        for field in ("type", "sourceUrl"):
+            if not row.get(field) and extra.get(field):
+                row[field] = extra[field]
+        step = STEP_BY_LAYER[row["layer"]]
+        if row["layer"] == "assets" and has_enrich and key(row["name"]) not in hunt_keys:
+            step = "enrich_physical_assets"
+        locations.append({**row, "step": step,
+                          **{k: v for k, v in extra.items() if k not in ("type", "sourceUrl") and v}})
+    return locations
+
+
+# --------------------------------------------------------------------------- conectores sectoriales
+
+GROUP_OWNERS = ("iberdrola", "avangrid", "neoenergia", "scottish power", "scottishpower", "elektro", "coelba",
+                "celpe", "cosern")
+TECHNOLOGY = {"wind": "Parque eólico", "solar": "Planta solar", "hydro": "Central hidroeléctrica",
+              "gas": "Central de gas", "coal": "Central de carbón", "battery": "Almacenamiento en baterías",
+              "nuclear": "Central nuclear", "oil": "Central de fuel", "bioenergy": "Planta de bioenergía",
+              "geothermal": "Central geotérmica"}
+GLENCORE_TYPES = {"mine": "Mina", "power_station": "Central eléctrica", "terminal": "Terminal",
+                  "pipeline": "Gasoducto u oleoducto", "oil_gas_field": "Yacimiento de petróleo y gas"}
+
+
+def external_rows(outputs, run):
+    path = os.path.join(outputs, "runs", run, "csv_exports", "all_locations_master.csv")
+    return list(csv.DictReader(open(path, encoding="utf-8-sig")))
+
+
+def connectors_iberdrola(outputs):
+    rows = external_rows(outputs, "20260413_131000_Iberdrola_External_Assets")
+    gem = {key(r["asset_name"]): r for r in csv.DictReader(open(
+        os.path.join(outputs, "gem_exports", "iberdrola_productive_assets_with_gem_status.csv"), encoding="utf-8-sig"))}
+    steps, locations = [], []
+
+    # Activos productivos: GEM Wiki y proyectos emblemáticos de la web oficial.
+    productive_all = [r for r in rows if r["type"] == "productive_asset"]
+    productive = [r for r in productive_all if to_float(r["latitude"]) is not None]
+    discarded = len(productive_all) - len(productive)
+    owned = linked = 0
+    techs, statuses = Counter(), Counter()
+    for r in productive:
+        g = gem.get(key(r["name"]), {})
+        owner = clean(g.get("gem_owner"))
+        official = "iberdrola.com" in r["source_url"]
+        is_group = official or any(k in owner.lower() for k in GROUP_OWNERS)
+        tech = clean(g.get("technology")).split(";")[0]
+        status = status_label(g.get("gem_status"))
+        techs[TECHNOLOGY.get(tech, "Otros")] += 1
+        if status:
+            statuses[status] += 1
+        owned += is_group
+        linked += not is_group
+        capacity = to_float(g.get("capacity_mw"))
+        locations.append({
+            "layer": "assets" if is_group else "linked", "step": "connector_gem", "name": clean(r["name"]),
+            "type": TECHNOLOGY.get(tech, "Activo productivo"), "country": clean(r["country"]),
+            "lat": to_float(r["latitude"]), "lon": to_float(r["longitude"]), "status": status,
+            "owner": owner or ("Iberdrola (web oficial)" if official else ""),
+            "capacity": ("%s MW" % ("%g" % capacity).replace(".", ",")) if capacity else "",
+            "sourceUrl": clean(r["source_url"]),
+        })
+    steps.append({
+        "task": "connector_gem", "agent": "GEM Wiki connector", "stage": "connectors", "label": "Conector GEM Wiki",
+        "tools": ["GEMWikiSearchTool"], "records": len(productive),
+        "log": [
+            "Búsqueda de activos productivos del grupo en GEM Wiki",
+            "%s · %s de GEM Wiki y %s de la web oficial" % (
+                plural(len(productive), "activo productivo", "activos productivos"),
+                number(sum(1 for r in productive if "gem.wiki" in r["source_url"])),
+                number(sum(1 for r in productive if "iberdrola.com" in r["source_url"]))),
+            "Tecnologías: " + top(techs, 4),
+            "Estado: " + top(statuses, 4),
+            "Titularidad del grupo confirmada en %s activos" % number(owned),
+            "%s con otro titular o sin titular: capa «Activos vinculados»" % number(linked),
+            "%s sin coordenadas descartadas: empresas o artículos, no activos" % plural(discarded, "página", "páginas"),
+        ],
+    })
+
+    offices = [r for r in rows if r["type"] in ("office", "corporate_headquarters", "foundation", "other_center")]
+    office_types = {"office": "Oficina", "corporate_headquarters": "Sede corporativa", "foundation": "Fundación",
+                    "other_center": "Otro centro"}
+    for r in offices:
+        locations.append({"layer": "offices", "step": "connector_offices", "name": clean(r["name"]),
+                          "type": office_types[r["type"]], "address": clean(r["address"]), "country": clean(r["country"]),
+                          "lat": to_float(r["latitude"]), "lon": to_float(r["longitude"]),
+                          "sourceUrl": clean(r["source_url"])})
+    countries = Counter(r["country"] for r in offices if r["country"])
+    steps.append({
+        "task": "connector_offices", "agent": "Official website connector", "stage": "connectors",
+        "label": "Sedes y oficinas del grupo", "tools": ["SafeWebsiteContentTool", "OSMGeocodingTool"],
+        "records": len(offices),
+        "log": ["Directorio de oficinas del grupo en iberdrola.com",
+                "%s en %s" % (plural(len(offices), "sede u oficina", "sedes y oficinas"), plural(len(countries), "país", "países")),
+                "Países: " + top(countries, 5, translate=True),
+                "Direcciones geocodificadas con OpenStreetMap"] +
+               ["%s · %s" % (clean(r["name"]), country_es(clean(r["country"]))) for r in offices[:4]],
+    })
+
+    chargers = [r for r in rows if r["type"] == "charger"]
+    active = [r for r in chargers if r["status"] != "BAJA"]
+    for r in active:
+        locations.append({"layer": "charging", "step": "connector_charging", "name": clean(r["name"]),
+                          "type": "Punto de recarga", "address": clean(r["address"]), "region": clean(r["region"]).title(),
+                          "country": clean(r["country"]), "lat": to_float(r["latitude"]), "lon": to_float(r["longitude"]),
+                          "status": "Operativo" if r["status"] == "OPER" else clean(r["status"]),
+                          "source": "Exportación de la red de recarga"})
+    states = Counter(r["status"] for r in chargers)
+    regions = Counter(clean(r["region"]).title() for r in active if r["region"])
+    steps.append({
+        "task": "connector_charging", "agent": "Charging network connector", "stage": "connectors",
+        "label": "Red de puntos de recarga", "tools": ["Exportación de la red de recarga"], "records": len(active),
+        "log": ["Exportación de la red de puntos de recarga del grupo",
+                "%s leídos · %s operativos · %s en estado EC_APR" % (
+                    number(len(chargers)), number(states["OPER"]), number(states["EC_APR"])),
+                "%s de baja excluidos del inventario" % plural(states["BAJA"], "punto", "puntos"),
+                "Provincias con más puntos: " + top(regions, 5),
+                "%s incorporados al mapa" % plural(len(active), "punto de recarga", "puntos de recarga")],
+    })
+    return steps, locations
+
+
+def connectors_glencore(outputs):
+    rows = external_rows(outputs, "20260413_132000_Glencore_External_Assets")
+    steps, locations = [], []
+    entities = [r for r in rows if r["type"] == "office"]
+    for r in entities:
+        locations.append({"layer": "entities", "step": "connector_entities", "name": clean(r["name"]),
+                          "type": "Entidad del grupo", "address": clean(r["address"]), "country": clean(r["country"]),
+                          "lat": to_float(r["latitude"]), "lon": to_float(r["longitude"]),
+                          "sourceUrl": clean(r["source_url"])})
+    countries = Counter(r["country"] for r in entities if r["country"])
+    addresses = Counter(re.sub(r"^(Level|Suite|Floor)\s+\w+,\s*", "", clean(r["address"])) for r in entities if r["address"])
+    busiest, busiest_n = addresses.most_common(1)[0]
+    steps.append({
+        "task": "connector_entities", "agent": "Group entities connector", "stage": "connectors",
+        "label": "Entidades del grupo", "tools": ["SafeWebsiteContentTool", "OSMGeocodingTool"],
+        "records": len(entities),
+        "log": ["Listado de entidades del grupo publicado en glencore.com",
+                "%s con domicilio registrado en %s" % (plural(len(entities), "entidad", "entidades"),
+                                                        plural(len(countries), "jurisdicción", "jurisdicciones")),
+                "Jurisdicciones: " + top(countries, 6, translate=True),
+                "Domicilio más repetido: %s entidades en %s" % (number(busiest_n), busiest),
+                "Domicilios geocodificados con OpenStreetMap"],
+    })
+
+    assets = [r for r in rows if r["type"] in GLENCORE_TYPES]
+    for r in assets:
+        locations.append({"layer": "assets", "step": "connector_gem", "name": clean(r["name"]),
+                          "type": GLENCORE_TYPES[r["type"]], "country": clean(r["country"]),
+                          "lat": to_float(r["latitude"]), "lon": to_float(r["longitude"]),
+                          "sourceUrl": clean(r["source_url"])})
+    kinds = Counter(GLENCORE_TYPES[r["type"]] for r in assets)
+    steps.append({
+        "task": "connector_gem", "agent": "GEM Wiki connector", "stage": "connectors", "label": "Conector GEM Wiki",
+        "tools": ["GEMWikiSearchTool"], "records": len(assets),
+        "log": ["Activos vinculados a Glencore en GEM Wiki",
+                "%s: %s" % (plural(len(assets), "activo", "activos"), top(kinds, 5)),
+                "Países: " + top(Counter(r["country"] for r in assets if r["country"]), 5, translate=True)] +
+               ["%s · %s · %s" % (clean(r["name"]), GLENCORE_TYPES[r["type"]], country_es(clean(r["country"]))) for r in assets[:4]],
+    })
+    return steps, locations
+
+
+CONNECTOR_BUILDERS = {"iberdrola": connectors_iberdrola, "glencore": connectors_glencore}
+
+
+# --------------------------------------------------------------------------- empresa
+
+def build_case(slug, run_id, plan_run, connectors_key, outputs):
+    runs = os.path.join(outputs, "runs")
+    run = os.path.join(runs, run_id)
+    out = {task["task"]: load(run, task["task"]) for task in PIPELINE}
+    export = out["export_consolidated_data"] or {}
+    datasets = export.get("datasets", export) if isinstance(export, dict) else {}
+
+    plan = out["plan_source_strategy"]
+    if plan is None and plan_run:
+        plan = load(os.path.join(runs, plan_run), "plan_source_strategy")
+        out["plan_source_strategy"] = plan
+    plan = plan or {}
+    profile = out["research_company_profile"]
+    if not isinstance(profile, dict):
+        profile = next((v for k, v in datasets.items() if k.endswith("_company_profile") and isinstance(v, dict)), {})
+
+    cost_path = os.path.join(run, "cost_summary.json")
+    cost = json.load(open(cost_path, encoding="utf-8")) if os.path.exists(cost_path) else None
+    cost_by_agent = {a["agent_name"]: a for a in cost["by_agent"]} if cost else {}
+
+    name = clean(profile.get("canonical_company_name")) or run_id.split("_", 2)[2].replace("_", " ")
+    logs, order = flow_logs(out, plan, profile, name)
+    locations = flow_locations(run, out)
+
+    connector_steps = []
+    if connectors_key:
+        connector_steps, connector_locations = CONNECTOR_BUILDERS[connectors_key](outputs)
+        seen = {key(loc["name"]) for loc in connector_locations}
+        locations = [loc for loc in locations if key(loc["name"]) not in seen] + connector_locations
+
+    locations = [compact({"id": "%s-%05d" % (slug, index + 1), **loc}) for index, loc in enumerate(locations)]
+
     with_coords = sum(1 for loc in locations if loc["lat"] is not None)
-    with_source = sum(1 for loc in locations if loc["sourceUrl"])
+    with_source = sum(1 for loc in locations if loc.get("sourceUrl") or loc.get("source"))
+    countries = {loc["country"] for loc in locations if loc.get("country")}
+    sources = {host(loc["sourceUrl"]) for loc in locations if loc.get("sourceUrl")}
     logs["export_consolidated_data"] = [
         "Deduplicación y normalización de %s" % plural(len(locations), "localización", "localizaciones"),
-        "Vista maestra: %d registros · %d con coordenadas" % (len(locations), with_coords),
-        "%d registros con URL de fuente" % with_source,
-        "Capas: perfil, activos, oficinas, entidades, marca y geocodificación",
+        "Vista maestra: %s registros · %s con coordenadas" % (number(len(locations)), number(with_coords)),
+        "%s registros con fuente trazable · %s" % (number(with_source), plural(len(sources), "dominio web", "dominios web")),
+        "Capas: perfil corporativo y %s" % plural(len({loc["layer"] for loc in locations}), "capa de localizaciones",
+                                                  "capas de localizaciones"),
         "Exportación JSON y CSV lista",
     ]
 
+    step_counts = Counter(loc["step"] for loc in locations)
     agents = []
     for step in PIPELINE:
+        # Un paso existe si la tarea dejó su fichero, aunque su salida no fuese JSON válido (perfil de IKEA).
+        ran = os.path.exists(os.path.join(run, step["task"] + ".json")) or (
+            step["task"] == "plan_source_strategy" and bool(plan))
+        if not ran:
+            continue
+        if step["task"] == "export_consolidated_data":
+            for connector_step in connector_steps:
+                agents.append({**connector_step, "kind": "connector", "model": "", "requests": 0, "tokens": 0,
+                               "costUsd": 0, "mapped": step_counts.get(connector_step["task"], 0)})
         metrics = cost_by_agent.get(step["agent"], {})
-        agents.append({**step, "model": metrics.get("model", "gpt-4o-mini"),
+        if step["task"] == "export_consolidated_data":
+            task_records = len(locations)
+        elif step["task"] in ("plan_source_strategy", "research_company_profile"):
+            task_records = 1
+        else:
+            task_records = len(records(out[step["task"]]))
+        agents.append({**step, "kind": "agent", "model": metrics.get("model", "gpt-4o-mini"),
                        "requests": metrics.get("successful_requests", 0), "tokens": metrics.get("total_tokens", 0),
-                       "costUsd": metrics.get("estimated_cost_usd", 0), "log": logs[step["task"]],
-                       "reveals": reveal.get(step["task"], [])})
+                       "costUsd": metrics.get("estimated_cost_usd", 0), "records": task_records,
+                       "log": logs[step["task"]], "mapped": step_counts.get(step["task"], 0)})
 
-    layer_counts = {}
-    for loc in locations:
-        layer_counts[loc["layer"]] = layer_counts.get(loc["layer"], 0) + 1
-    countries = sorted({loc["country"] for loc in locations if loc["country"]})
-
-    return {
+    layer_counts = Counter(loc["layer"] for loc in locations)
+    summary = {
         "slug": slug, "name": name, "runDate": "%s-%s-%s" % (run_id[:4], run_id[4:6], run_id[6:8]),
-        "sector": sector_label(plan.get("workflow_sector")), "sectorRaw": clean(plan.get("workflow_sector")),
-        "headquarters": clean(profile.get("headquarters")),
+        "sector": sector_label(plan.get("workflow_sector")), "headquarters": clean(profile.get("headquarters")),
+        "brands": len(profile.get("brand_names") or []), "parent": clean(profile.get("parent_company")),
+        "hasCost": cost is not None, "hasConnectors": bool(connector_steps),
+        "totals": {
+            "locations": len(locations), "withCoordinates": with_coords, "withSource": with_source,
+            "countries": len(countries), "sources": len(sources), "layers": dict(layer_counts),
+            "connectorRecords": sum(s["records"] for s in connector_steps), "steps": len(agents),
+            "requests": cost["total"]["successful_requests"] if cost else None,
+            "tokens": cost["total"]["total_tokens"] if cost else None,
+            "costUsd": cost["total"]["estimated_cost_usd"] if cost else None,
+        },
+    }
+    detail = {
+        **summary,
         "plan": {
             "sector": sector_label(plan.get("workflow_sector")),
             "confidence": CONFIDENCE.get(clean(plan.get("confidence")).lower(), clean(plan.get("confidence"))),
@@ -360,32 +636,36 @@ def build_case(slug, run_id, runs_dir):
             "headquarters": clean(profile.get("headquarters")), "brands": profile.get("brand_names") or [],
             "subsidiaries": profile.get("major_subsidiaries") or [], "websites": profile.get("official_websites") or [],
             "countries": profile.get("countries_of_operation") or [],
-            "identifiers": {k.replace("_", " "): flat(v) for k, v in ids.items() if flat(v)},
-            "activityCodes": {k.replace("_", " "): flat(v) for k, v in codes.items() if flat(v)},
+            "identifiers": {k.replace("_", " "): flat(v) for k, v in (profile.get("public_company_identifiers") or {}).items() if flat(v)},
+            "activityCodes": {k.replace("_", " "): flat(v) for k, v in (profile.get("economic_activity_codes") or {}).items() if flat(v)},
             "summary": clean(profile.get("sector_summary")), "sources": profile.get("source_urls") or [],
         },
         "agents": agents,
         "locations": locations,
-        "totals": {
-            "locations": len(locations), "withCoordinates": with_coords, "withSource": with_source,
-            "countries": len(countries), "layers": layer_counts,
-            "requests": cost["total"]["successful_requests"], "tokens": cost["total"]["total_tokens"],
-            "costUsd": cost["total"]["estimated_cost_usd"],
-        },
     }
+    return summary, detail
 
 
 def main():
-    runs_dir = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_RUNS
-    cases = [build_case(slug, run_id, runs_dir) for slug, run_id in CASES]
-    path = os.path.join(ROOT, "public", "data", "cases.json")
-    with open(path, "w", encoding="utf-8") as handle:
-        json.dump({"cases": cases}, handle, ensure_ascii=False, separators=(",", ":"))
-    for case in cases:
-        t = case["totals"]
-        print("%-26s %3d localizaciones · %d con coordenadas · %d países · %s" % (
-            case["name"], t["locations"], t["withCoordinates"], t["countries"], t["layers"]))
-    print("Escrito:", path, "(%d KB)" % (os.path.getsize(path) // 1024))
+    outputs = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_OUTPUTS
+    cases_dir = os.path.join(ROOT, "public", "data", "cases")
+    os.makedirs(cases_dir, exist_ok=True)
+    index = []
+    for slug, run_id, plan_run, connectors_key in CASES:
+        summary, detail = build_case(slug, run_id, plan_run, connectors_key, outputs)
+        index.append(summary)
+        path = os.path.join(cases_dir, slug + ".json")
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(detail, handle, ensure_ascii=False, separators=(",", ":"))
+        t = summary["totals"]
+        print("%-30s %6s localizaciones · %6s con coordenadas · %3d países · %s · %d KB" % (
+            summary["name"], number(t["locations"]), number(t["withCoordinates"]), t["countries"], t["layers"],
+            os.path.getsize(path) // 1024))
+    with open(os.path.join(ROOT, "public", "data", "index.json"), "w", encoding="utf-8") as handle:
+        json.dump({"cases": index}, handle, ensure_ascii=False, separators=(",", ":"))
+    legacy = os.path.join(ROOT, "public", "data", "cases.json")
+    if os.path.exists(legacy):
+        os.remove(legacy)
 
 
 if __name__ == "__main__":

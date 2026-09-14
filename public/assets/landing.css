@@ -23,10 +23,10 @@
 .hero h1 { margin: 0; max-width: 16ch; font-size: clamp(36px, 5.2vw, 64px); font-weight: 750; line-height: 1.05; letter-spacing: -.03em; }
 .lede { max-width: 54ch; margin: 24px 0 0; color: rgba(255,255,255,.74); font-size: clamp(15px, 1.5vw, 18px); line-height: 1.62; }
 .hero-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 34px; }
-.hero-stats { display: flex; flex-wrap: wrap; gap: 0; margin: 56px 0 0; padding: 0; max-width: 760px; }
-.hero-stats div { padding: 4px 26px 4px 0; margin-right: 26px; border-right: 1px solid rgba(255,255,255,.12); }
+.hero-stats { display: flex; flex-wrap: wrap; gap: 0; margin: 56px 0 0; padding: 0; max-width: 980px; }
+.hero-stats div { padding: 4px 22px 4px 0; margin-right: 22px; border-right: 1px solid rgba(255,255,255,.12); }
 .hero-stats div:last-child { border-right: 0; }
-.hero-stats dt { order: 2; color: rgba(255,255,255,.5); font-size: 11.5px; font-weight: 600; }
+.hero-stats dt { order: 2; color: rgba(255,255,255,.5); font-size: 11.5px; font-weight: 600; white-space: nowrap; }
 .hero-stats dd { margin: 0 0 2px; color: var(--white); font-size: 28px; font-weight: 750; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
 .hero-stats div { display: flex; flex-direction: column-reverse; }
 @media (max-width: 900px) {
@@ -108,8 +108,8 @@
 
 /* explorador */
 .explorer { border: 1px solid var(--slate-200); border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-md); }
-.explorer-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); background: var(--navy-950); }
-.explorer-tab { padding: 16px 20px; border: 0; border-right: 1px solid rgba(255,255,255,.07); background: transparent; color: rgba(255,255,255,.6); text-align: left; cursor: pointer; }
+.explorer-tabs { display: flex; overflow-x: auto; background: var(--navy-950); scrollbar-width: thin; }
+.explorer-tab { flex: 1 0 150px; padding: 15px 18px; border: 0; border-right: 1px solid rgba(255,255,255,.07); background: transparent; color: rgba(255,255,255,.6); text-align: left; cursor: pointer; white-space: nowrap; }
 .explorer-tab:last-child { border-right: 0; }
 .explorer-tab strong { display: block; color: var(--white); font-size: 15px; font-weight: 700; }
 .explorer-tab span { font-size: 12px; }
@@ -135,7 +135,7 @@
 .side-list button:hover { background: var(--slate-100); }
 .side-list small { margin-left: auto; color: var(--slate-400); font-size: 11.5px; white-space: nowrap; }
 .side-link { margin-top: auto; }
-@media (max-width: 960px) { .explorer-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); } .explorer-body { grid-template-columns: minmax(0, 1fr); } .explorer-side { border-left: 0; border-top: 1px solid var(--slate-200); } }
+@media (max-width: 960px) { .explorer-body { grid-template-columns: minmax(0, 1fr); } .explorer-side { border-left: 0; border-top: 1px solid var(--slate-200); } }
 
 /* impacto */
 .impact { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 56px; align-items: center; }
@@ -182,3 +182,17 @@
 .cta p { margin: 0; color: rgba(255,255,255,.66); }
 .footer { padding: 24px 0; background: var(--navy-950); border-top: 1px solid rgba(255,255,255,.07); color: rgba(255,255,255,.45); font-size: 12.5px; }
 .footer-inner { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; }
+
+/* conectores */
+.connector-cases { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.connector-case { display: flex; flex-direction: column; gap: 12px; padding: 26px; border-radius: var(--radius-lg); background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.09); }
+.connector-kicker { margin: 0; color: var(--yellow); font-size: 10.5px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
+.connector-case h3 { margin: 0; color: var(--white); font-size: 24px; letter-spacing: -.02em; }
+.connector-big { margin: 0; color: var(--white); font-size: 46px; font-weight: 750; letter-spacing: -.04em; line-height: 1; font-variant-numeric: tabular-nums; }
+.connector-big small { display: block; margin-top: 6px; color: rgba(255,255,255,.55); font-size: 13.5px; font-weight: 500; letter-spacing: 0; }
+.connector-list { display: grid; gap: 9px; margin: 6px 0 0; padding: 0; list-style: none; }
+.connector-list li { display: flex; align-items: center; gap: 10px; color: rgba(255,255,255,.78); font-size: 14px; }
+.connector-list b { color: var(--white); font-variant-numeric: tabular-nums; }
+.connector-note { margin: 4px 0 6px; color: rgba(255,255,255,.55); font-size: 13px; line-height: 1.55; }
+.connector-case .btn { align-self: flex-start; }
+@media (max-width: 900px) { .connector-cases { grid-template-columns: minmax(0, 1fr); } }

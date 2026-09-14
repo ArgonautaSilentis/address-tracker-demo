@@ -282,3 +282,11 @@ body { background: var(--slate-100); }
   .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .map-panel { position: static; }
 }
+
+/* conectores sectoriales */
+.queue-tag { display: inline-block; margin-top: 8px; padding: 2px 8px; border-radius: 6px; background: #efeaff; color: #5b3fc4; font-size: 10.5px; font-weight: 750; }
+.agent-connector .agent-icon { border-style: dashed; }
+.agent-connector[data-state="done"] .agent-icon { border-style: solid; background: #7c5cf0; border-color: #7c5cf0; }
+.agent-connector[data-state="running"] { background: #f5f2ff; border-color: #d9cffd; }
+.agent-connector[data-state="running"] .agent-icon::after { border-color: rgba(124,92,240,.22); border-top-color: #7c5cf0; }
+.flow-loading { margin: 8px; color: var(--slate-500); font-size: 13px; }

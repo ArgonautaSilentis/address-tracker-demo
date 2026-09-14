@@ -81,10 +81,10 @@
         <div class="kpi"><span class="kpi-value" id="kpiLocations">0</span><span class="kpi-label">Localizaciones</span></div>
         <div class="kpi"><span class="kpi-value" id="kpiCountries">0</span><span class="kpi-label">Países</span></div>
         <div class="kpi"><span class="kpi-value" id="kpiGeo">—</span><span class="kpi-label">Con coordenadas</span></div>
-        <div class="kpi"><span class="kpi-value" id="kpiSource">—</span><span class="kpi-label">Con URL de fuente</span></div>
-        <div class="kpi"><span class="kpi-value" id="kpiRequests">0</span><span class="kpi-label">Llamadas al modelo</span></div>
-        <div class="kpi"><span class="kpi-value" id="kpiTokens">0</span><span class="kpi-label">Tokens</span></div>
-        <div class="kpi"><span class="kpi-value" id="kpiCost">$0.000</span><span class="kpi-label">Coste estimado</span></div>
+        <div class="kpi"><span class="kpi-value" id="kpiSource">—</span><span class="kpi-label">Con fuente trazable</span></div>
+        <div class="kpi"><span class="kpi-value" id="kpiRequests">0</span><span class="kpi-label" id="kpiRequestsLabel">Llamadas al modelo</span></div>
+        <div class="kpi"><span class="kpi-value" id="kpiTokens">0</span><span class="kpi-label" id="kpiTokensLabel">Tokens</span></div>
+        <div class="kpi"><span class="kpi-value" id="kpiCost">$0,000</span><span class="kpi-label" id="kpiCostLabel">Coste estimado</span></div>
       </section>
 
       <div class="grid">
@@ -94,7 +94,7 @@
               <p class="eyebrow-dark">01 · Orquestación</p>
               <h2 id="flowTitle">Flujo de agentes</h2>
             </div>
-            <span class="panel-note">Proceso secuencial · gpt-4o-mini</span>
+            <span class="panel-note" id="flowNote">Proceso secuencial · gpt-4o-mini</span>
           </div>
           <div class="flow-list" id="flowList"></div>
         </section>

@@ -19,17 +19,41 @@ const STAGES = [
 
 const number = new Intl.NumberFormat("es-ES");
 
-function renderStats(cases) {
-  const all = cases.flatMap((c) => c.locations);
-  const countries = new Set(all.map((l) => l.country).filter(Boolean));
-  const geo = all.filter((l) => Number.isFinite(l.lat)).length;
-  const cost = cases.reduce((acc, c) => acc + c.totals.costUsd, 0) / cases.length;
-  const set = (key, value) => { document.querySelector(`[data-stat="${key}"]`).textContent = value; };
-  set("cases", number.format(cases.length));
-  set("locations", number.format(all.length));
-  set("countries", number.format(countries.size));
-  set("geo", `${Math.round((geo / all.length) * 100)} %`);
+const set = (key, value) => { const el = document.querySelector(`[data-stat="${key}"]`); if (el) el.textContent = value; };
+
+function renderStats(index, details) {
+  const locations = index.reduce((acc, c) => acc + c.totals.locations, 0);
+  const geo = index.reduce((acc, c) => acc + c.totals.withCoordinates, 0);
+  const withCost = index.filter((c) => c.hasCost);
+  const cost = withCost.reduce((acc, c) => acc + c.totals.costUsd, 0) / withCost.length;
+  set("cases", number.format(index.length));
+  set("locations", number.format(locations));
+  set("geo", `${Math.round((geo / locations) * 100)} %`);
   set("cost", `${cost.toFixed(2).replace(".", ",")} US$`);
+  if (details) {
+    const countries = new Set(details.flatMap((d) => d.locations.map((l) => l.country)).filter(Boolean));
+    set("countries", number.format(countries.size));
+  }
+}
+
+function renderConnectorStats(index) {
+  const iberdrola = index.find((c) => c.slug === "iberdrola");
+  const glencore = index.find((c) => c.slug === "glencore");
+  if (iberdrola) {
+    const l = iberdrola.totals.layers;
+    set("ib-locations", number.format(iberdrola.totals.locations));
+    set("ib-charging", number.format(l.charging || 0));
+    set("ib-assets", number.format(l.assets || 0));
+    set("ib-offices", number.format(l.offices || 0));
+    set("ib-countries", number.format(iberdrola.totals.countries));
+  }
+  if (glencore) {
+    const l = glencore.totals.layers;
+    set("gl-entities", number.format(l.entities || 0));
+    set("gl-assets", number.format(l.assets || 0));
+    set("gl-countries", number.format(glencore.totals.countries));
+    set("gl-locations", number.format(glencore.totals.locations));
+  }
 }
 
 function renderPipeline(agents, example) {
@@ -55,42 +79,46 @@ function renderPipeline(agents, example) {
   }).join("");
 }
 
-function heroMap(cases) {
+function heroMap() {
   const container = document.querySelector("#heroMap");
   const map = new FootprintMap(container, { theme: "dark", globe: true, interactive: false, center: [-28, 18], zoom: 2.05 });
-  map.setLocations(cases.flatMap((c) => c.locations));
   map.spin(4);
+  return map;
 }
 
-function renderExplorer(cases) {
+function renderExplorer(index, loadDetail) {
   const tabs = document.querySelector("#explorerTabs");
   const side = document.querySelector("#explorerSide");
   const map = new FootprintMap(document.querySelector("#explorerMap"), { theme: "light", globe: false, center: [0, 25], zoom: 1.2 });
+  let requested = null;
 
-  function show(slug) {
-    const data = cases.find((c) => c.slug === slug);
+  async function show(slug) {
+    requested = slug;
     for (const tab of tabs.querySelectorAll("button")) tab.setAttribute("aria-selected", String(tab.dataset.slug === slug));
+    const data = await loadDetail(slug);
+    if (requested !== slug) return;
     map.setLocations(data.locations);
     map.fit(data.locations, { duration: 1400, padding: 60, maxZoom: 7 });
     const layers = Object.keys(LAYERS).filter((key) => data.totals.layers[key]);
     const total = data.totals.locations;
-    const featured = data.locations.filter((l) => l.layer === "assets" || l.layer === "offices").slice(0, 6);
+    const featured = data.locations.filter((l) => (l.layer === "assets" || l.layer === "offices") && Number.isFinite(l.lat)).slice(0, 6);
     side.innerHTML = `
       <div><p class="side-title">${escapeHtml(data.name)}</p><p class="side-sub">${escapeHtml(data.sector)} · ${data.totals.countries} ${data.totals.countries === 1 ? "país" : "países"}</p></div>
       <div class="side-bar">${layers.map((key) => `<span style="width:${(data.totals.layers[key] / total) * 100}%;background:${LAYERS[key].color}"></span>`).join("")}</div>
-      <ul class="side-counts">${layers.map((key) => `<li><span class="layer-dot" data-layer="${key}"></span>${escapeHtml(LAYERS[key].label)}<b>${data.totals.layers[key]}</b></li>`).join("")}</ul>
+      <ul class="side-counts">${layers.map((key) => `<li><span class="layer-dot" data-layer="${key}"></span>${escapeHtml(LAYERS[key].label)}<b>${number.format(data.totals.layers[key])}</b></li>`).join("")}</ul>
       <div class="side-metrics">
-        <div><b>${total}</b><span>localizaciones</span></div>
+        <div><b>${number.format(total)}</b><span>localizaciones</span></div>
         <div><b>${Math.round((data.totals.withCoordinates / total) * 100)} %</b><span>geolocalizadas</span></div>
-        <div><b>${data.totals.costUsd.toFixed(2).replace(".", ",")} $</b><span>coste LLM</span></div>
+        ${data.hasCost ? `<div><b>${data.totals.costUsd.toFixed(2).replace(".", ",")} $</b><span>coste LLM</span></div>`
+          : `<div><b>${data.totals.countries}</b><span>países</span></div>`}
       </div>
-      <ul class="side-list">${featured.map((l) => `<li><button type="button" data-id="${l.id}"><span class="layer-dot" data-layer="${l.layer}"></span>${escapeHtml(l.name)}<small>${escapeHtml(l.city || l.country)}</small></button></li>`).join("")}</ul>
+      <ul class="side-list">${featured.map((l) => `<li><button type="button" data-id="${l.id}"><span class="layer-dot" data-layer="${l.layer}"></span>${escapeHtml(l.name)}<small>${escapeHtml(l.city || l.country || "")}</small></button></li>`).join("")}</ul>
       <a class="btn btn-light btn-sm side-link" href="/demo?empresa=${data.slug}">Analizar en la mesa →</a>`;
     side.querySelectorAll("[data-id]").forEach((button) => button.addEventListener("click", () => map.select(button.dataset.id)));
   }
 
-  tabs.innerHTML = cases.map((c) => `<button class="explorer-tab" type="button" role="tab" data-slug="${c.slug}" aria-selected="false">
-    <strong>${escapeHtml(c.name.replace(/\s+(S\.A\.|PLC|SE|Holding B\.V\.)$/, ""))}</strong><span>${escapeHtml(c.sector)} · ${c.totals.locations} localizaciones</span></button>`).join("");
+  tabs.innerHTML = index.map((c) => `<button class="explorer-tab" type="button" role="tab" data-slug="${c.slug}" aria-selected="false">
+    <strong>${escapeHtml(shortName(c.name))}</strong><span>${number.format(c.totals.locations)} localizaciones</span></button>`).join("");
   tabs.querySelectorAll("button").forEach((tab) => tab.addEventListener("click", () => show(tab.dataset.slug)));
 
   // El mapa se prepara cuando la sección entra en pantalla, para que el encuadre se anime a la vista.
@@ -98,18 +126,38 @@ function renderExplorer(cases) {
     if (entries.some((e) => e.isIntersecting)) {
       observer.disconnect();
       map.resize();
-      show(cases[0].slug);
+      show(index[0].slug);
     }
   }, { threshold: 0.25 });
   observer.observe(document.querySelector(".explorer"));
 }
 
+function shortName(name) {
+  return name.replace(/,?\s+(S\.A\.|PLC|plc|SE|Holding B\.V\.|Netherland)$/, "").replace(/^Inter\s+/, "");
+}
+
 async function init() {
-  const { cases } = await (await fetch("/data/cases.json")).json();
-  renderStats(cases);
-  renderPipeline(cases[0].agents, cases[0]);
-  heroMap(cases);
-  renderExplorer(cases);
+  const { cases: index } = await (await fetch("/data/index.json")).json();
+  const cache = new Map();
+  const loadDetail = (slug) => {
+    if (!cache.has(slug)) cache.set(slug, fetch(`/data/cases/${slug}.json`).then((r) => r.json()));
+    return cache.get(slug);
+  };
+  renderStats(index);
+  renderConnectorStats(index);
+  const hero = heroMap();
+  renderExplorer(index, loadDetail);
+  const first = await loadDetail(index[0].slug);
+  renderPipeline(first.agents, first);
+  // El globo se va poblando empresa a empresa; la más pesada, al final.
+  const order = [...index].sort((a, b) => a.totals.locations - b.totals.locations);
+  const details = [];
+  for (const item of order) {
+    const data = await loadDetail(item.slug);
+    details.push(data);
+    hero.addLocations(data.locations, { pulse: false });
+  }
+  renderStats(index, details);
 }
 
 init();

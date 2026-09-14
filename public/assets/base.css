@@ -101,6 +101,8 @@ button { font: inherit; }
 .layer-dot[data-layer="offices"] { background: var(--layer-offices); }
 .layer-dot[data-layer="entities"] { background: var(--layer-entities); }
 .layer-dot[data-layer="brand"] { background: var(--layer-brand); }
+.layer-dot[data-layer="linked"] { background: #fb923c; }
+.layer-dot[data-layer="charging"] { background: #a78bfa; }
 
 .layer-chip {
   display: inline-flex; align-items: center; gap: 7px; padding: 3px 9px 3px 7px;
@@ -126,6 +128,8 @@ button { font: inherit; }
 .popup-address { margin: 0 0 10px; color: var(--slate-700); font-size: 12.5px; line-height: 1.45; }
 .popup-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
 .popup-meta span { padding: 2px 8px; border-radius: 6px; background: var(--slate-100); color: var(--slate-600); font-size: 11px; font-weight: 650; }
+.popup-owner { margin: 0 0 8px; color: var(--slate-600); font-size: 12px; }
+.popup-source-text { margin: 0; color: var(--slate-600); font-size: 12px; font-weight: 650; }
 .popup-coords { margin: 0 0 8px; color: var(--slate-500); font-family: var(--mono); font-size: 11px; }
 .popup-source { display: inline-flex; gap: 6px; color: var(--blue); font-size: 12px; font-weight: 700; text-decoration: none; word-break: break-all; }
 .popup-source:hover { text-decoration: underline; }

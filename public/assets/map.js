@@ -5,6 +5,8 @@ export const LAYERS = {
   offices: { label: "Oficinas corporativas", short: "Oficinas", color: "#4f8cff" },
   entities: { label: "Entidades operativas", short: "Entidades", color: "#2fbf8f" },
   brand: { label: "Localizaciones de marca", short: "Marca", color: "#ff6b9a" },
+  linked: { label: "Activos vinculados", short: "Vinculados", color: "#fb923c" },
+  charging: { label: "Red de recarga", short: "Recarga", color: "#a78bfa" },
   other: { label: "Otras localizaciones", short: "Otras", color: "#9ca5b5" },
 };
 
@@ -35,12 +37,14 @@ function featureCollection(locations) {
 
 const colorExpression = ["match", ["get", "layer"],
   "assets", LAYERS.assets.color, "offices", LAYERS.offices.color, "entities", LAYERS.entities.color,
-  "brand", LAYERS.brand.color, LAYERS.other.color];
+  "brand", LAYERS.brand.color, "linked", LAYERS.linked.color, "charging", LAYERS.charging.color, LAYERS.other.color];
+
+const isDense = ["==", ["get", "layer"], "charging"];
 
 export function popupHtml(loc) {
   const layer = LAYERS[loc.layer] || LAYERS.other;
   const place = [loc.city, loc.region, loc.country].filter(Boolean).join(", ");
-  const meta = [loc.status, loc.confidence && `Confianza ${loc.confidence.toLowerCase()}`, loc.relationship, loc.system]
+  const meta = [loc.status, loc.capacity, loc.confidence && `Confianza ${loc.confidence.toLowerCase()}`, loc.relationship, loc.system]
     .filter(Boolean).slice(0, 3);
   let host = "";
   try { host = loc.sourceUrl ? new URL(loc.sourceUrl).hostname.replace(/^www\./, "") : ""; } catch { host = ""; }
@@ -50,8 +54,10 @@ export function popupHtml(loc) {
     ${loc.type ? `<p class="popup-type">${escapeHtml(loc.type)}${loc.subtype && loc.subtype !== loc.type ? ` · ${escapeHtml(loc.subtype)}` : ""}</p>` : ""}
     <p class="popup-address">${escapeHtml(loc.address || place)}</p>
     ${meta.length ? `<div class="popup-meta">${meta.map((m) => `<span>${escapeHtml(m)}</span>`).join("")}</div>` : ""}
-    <p class="popup-coords">${loc.lat.toFixed(4)}, ${loc.lon.toFixed(4)}</p>
-    ${loc.sourceUrl ? `<a class="popup-source" href="${escapeHtml(loc.sourceUrl)}" target="_blank" rel="noopener noreferrer">Fuente · ${escapeHtml(host)} ↗</a>` : ""}`;
+    ${loc.owner ? `<p class="popup-owner">Titular: ${escapeHtml(loc.owner)}</p>` : ""}
+    ${Number.isFinite(loc.lat) ? `<p class="popup-coords">${loc.lat.toFixed(4)}, ${loc.lon.toFixed(4)}</p>` : ""}
+    ${loc.sourceUrl ? `<a class="popup-source" href="${escapeHtml(loc.sourceUrl)}" target="_blank" rel="noopener noreferrer">Fuente · ${escapeHtml(host)} ↗</a>`
+      : loc.source ? `<p class="popup-source-text">Fuente · ${escapeHtml(loc.source)}</p>` : ""}`;
 }
 
 export class FootprintMap {
@@ -90,6 +96,7 @@ export class FootprintMap {
     this.map.on("mouseleave", "loc-point", () => { this.map.getCanvas().style.cursor = ""; });
     this.map.on("error", (event) => {
       if (!this.ready && event?.error?.status >= 400) this.fail();
+      else if (event?.error) console.warn("Mapa:", event.error.message || event.error);
     });
   }
 
@@ -110,7 +117,7 @@ export class FootprintMap {
     const glowOpacity = this.theme === "dark" ? 0.28 : 0.12;
     if (!map.getLayer("loc-glow")) {
       map.addLayer({
-        id: "loc-glow", type: "circle", source: SOURCE,
+        id: "loc-glow", type: "circle", source: SOURCE, filter: ["!", isDense],
         paint: {
           "circle-color": colorExpression, "circle-opacity": glowOpacity, "circle-blur": 0.9,
           "circle-radius": ["interpolate", ["linear"], ["zoom"], 1, 13, 4, 16, 8, 20, 12, 24],
@@ -120,8 +127,11 @@ export class FootprintMap {
         id: "loc-point", type: "circle", source: SOURCE,
         paint: {
           "circle-color": colorExpression,
-          "circle-radius": ["interpolate", ["linear"], ["zoom"], 1, 5, 4, 6, 8, 7, 12, 9],
-          "circle-stroke-width": ["case", ["boolean", ["feature-state", "selected"], false], 3, 1.4],
+          // «zoom» solo puede ir en un interpolate de primer nivel: la distinción por capa va dentro de cada parada.
+          "circle-radius": ["interpolate", ["linear"], ["zoom"],
+            1, ["case", isDense, 1.7, 5], 4, ["case", isDense, 2.2, 6], 8, ["case", isDense, 3.4, 7], 12, ["case", isDense, 5.5, 9]],
+          "circle-opacity": ["case", isDense, 0.85, 1],
+          "circle-stroke-width": ["case", ["boolean", ["feature-state", "selected"], false], 3, isDense, 0, 1.4],
           "circle-stroke-color": this.theme === "dark" ? "#060d20" : "#ffffff",
         },
       });
@@ -146,13 +156,18 @@ export class FootprintMap {
     this.refresh();
   }
 
-  addLocations(locations, { pulse = true } = {}) {
-    for (const loc of locations) {
-      if (this.byId.has(loc.id)) continue;
+  addLocations(locations, { pulse = true, maxPulses = 24 } = {}) {
+    let pulses = 0;
+    const step = Math.max(1, Math.floor(locations.length / maxPulses));
+    locations.forEach((loc, index) => {
+      if (this.byId.has(loc.id)) return;
       this.locations.push(loc);
       this.byId.set(loc.id, loc);
-      if (pulse && this.map && this.visibleLayers.has(loc.layer) && Number.isFinite(loc.lat)) this.pulse(loc);
-    }
+      if (pulse && this.map && pulses < maxPulses && index % step === 0 && this.visibleLayers.has(loc.layer) && Number.isFinite(loc.lat)) {
+        this.pulse(loc);
+        pulses += 1;
+      }
+    });
     this.refresh();
   }
 
@@ -189,31 +204,34 @@ export class FootprintMap {
       this.map.flyTo({ center: [pts[0].lon, pts[0].lat], zoom: 6, duration });
       return;
     }
-    if (this.globe) {
-      // En el globo, fitBounds encuadra mal huellas repartidas por varios continentes: se centra en el
-      // centroide esférico y el zoom depende de la distancia angular al punto más alejado.
-      const rad = Math.PI / 180;
-      let x = 0; let y = 0; let z = 0;
-      for (const loc of pts) {
-        x += Math.cos(loc.lat * rad) * Math.cos(loc.lon * rad);
-        y += Math.cos(loc.lat * rad) * Math.sin(loc.lon * rad);
-        z += Math.sin(loc.lat * rad);
-      }
-      const lon = Math.atan2(y, x) / rad;
-      const lat = Math.atan2(z, Math.hypot(x, y)) / rad;
-      const spread = Math.max(...pts.map((loc) => {
-        const cos = Math.sin(lat * rad) * Math.sin(loc.lat * rad) +
-          Math.cos(lat * rad) * Math.cos(loc.lat * rad) * Math.cos((loc.lon - lon) * rad);
-        return Math.acos(Math.min(1, Math.max(-1, cos))) / rad;
-      }));
-      if (spread > 18) {
-        const zoom = spread > 70 ? 1.15 : spread > 45 ? 1.6 : spread > 30 ? 2.2 : 2.8;
-        this.map.flyTo({ center: [lon, lat], zoom, duration, essential: true });
-        return;
-      }
+    // Centroide esférico y distancia angular de cada punto. Se encuadra el 90 % más cercano para que unos
+    // pocos puntos lejanos (una oficina en Australia) no alejen la cámara de donde se concentra la huella.
+    const rad = Math.PI / 180;
+    let x = 0; let y = 0; let z = 0;
+    for (const loc of pts) {
+      x += Math.cos(loc.lat * rad) * Math.cos(loc.lon * rad);
+      y += Math.cos(loc.lat * rad) * Math.sin(loc.lon * rad);
+      z += Math.sin(loc.lat * rad);
+    }
+    const lon = Math.atan2(y, x) / rad;
+    const lat = Math.atan2(z, Math.hypot(x, y)) / rad;
+    const distance = (loc) => {
+      const cos = Math.sin(lat * rad) * Math.sin(loc.lat * rad) +
+        Math.cos(lat * rad) * Math.cos(loc.lat * rad) * Math.cos((loc.lon - lon) * rad);
+      return Math.acos(Math.min(1, Math.max(-1, cos))) / rad;
+    };
+    const measured = pts.map((loc) => [distance(loc), loc]).sort((a, b) => a[0] - b[0]);
+    const cut = pts.length > 20 ? Math.floor(measured.length * 0.9) : measured.length - 1;
+    const spread = measured[cut][0];
+    const inliers = measured.slice(0, cut + 1).map(([, loc]) => loc);
+
+    if (this.globe && spread > 12) {
+      const zoom = spread > 70 ? 1.15 : spread > 45 ? 1.6 : spread > 30 ? 2.2 : spread > 20 ? 2.8 : 3.4;
+      this.map.flyTo({ center: [lon, lat], zoom, duration, essential: true });
+      return;
     }
     const bounds = new maplibregl.LngLatBounds();
-    for (const loc of pts) bounds.extend([loc.lon, loc.lat]);
+    for (const loc of inliers) bounds.extend([loc.lon, loc.lat]);
     this.map.fitBounds(bounds, { padding, maxZoom, duration });
   }
 
@@ -223,7 +241,7 @@ export class FootprintMap {
 
   select(id, { fly = true } = {}) {
     const loc = this.byId.get(id);
-    if (!loc || !this.map) return;
+    if (!loc || !this.map || !Number.isFinite(loc.lat)) return;
     if (this.selectedId && this.ready) this.map.setFeatureState({ source: SOURCE, id: this.selectedId }, { selected: false });
     this.selectedId = id;
     if (this.ready) this.map.setFeatureState({ source: SOURCE, id }, { selected: true });

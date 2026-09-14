@@ -5,24 +5,29 @@ const els = {
   queueCount: $("#queueCount"), queueSearch: $("#queueSearch"), queueList: $("#queueList"), legendList: $("#legendList"),
   sectorChip: $("#sectorChip"), stateChip: $("#stateChip"), companyName: $("#companyName"), companyMeta: $("#companyMeta"),
   runStep: $("#runStep"), runClock: $("#runClock"), runBar: $("#runBar"), runButton: $("#runButton"),
-  runButtonText: $("#runButtonText"), flowList: $("#flowList"), layerToggles: $("#layerToggles"), mapEmpty: $("#mapEmpty"),
-  resultsLocked: $("#resultsLocked"), inventorySearch: $("#inventorySearch"), inventoryLayer: $("#inventoryLayer"),
-  inventoryCount: $("#inventoryCount"), inventoryBody: $("#inventoryBody"), tabProfile: $("#tabProfile"),
-  tabStrategy: $("#tabStrategy"), tabExport: $("#tabExport"), toastRegion: $("#toastRegion"),
+  runButtonText: $("#runButtonText"), flowList: $("#flowList"), flowNote: $("#flowNote"), layerToggles: $("#layerToggles"),
+  mapEmpty: $("#mapEmpty"), resultsLocked: $("#resultsLocked"), inventorySearch: $("#inventorySearch"),
+  inventoryLayer: $("#inventoryLayer"), inventoryCount: $("#inventoryCount"), inventoryBody: $("#inventoryBody"),
+  tabProfile: $("#tabProfile"), tabStrategy: $("#tabStrategy"), tabExport: $("#tabExport"), toastRegion: $("#toastRegion"),
   kpi: {
     locations: $("#kpiLocations"), countries: $("#kpiCountries"), geo: $("#kpiGeo"), source: $("#kpiSource"),
     requests: $("#kpiRequests"), tokens: $("#kpiTokens"), cost: $("#kpiCost"),
   },
+  kpiLabel: { requests: $("#kpiRequestsLabel"), tokens: $("#kpiTokensLabel"), cost: $("#kpiCostLabel") },
 };
 
-const STAGES = { plan: "Planificación", extract: "Extracción", consolidate: "Consolidación" };
+const STAGES = { plan: "Planificación", extract: "Extracción", consolidate: "Consolidación", connectors: "Conectores sectoriales" };
+const STATE_LABEL = { idle: "Pendiente", running: "Analizando", done: "Completado" };
+const INVENTORY_LIMIT = 300;
 const number = new Intl.NumberFormat("es-ES");
 const compact = new Intl.NumberFormat("es-ES", { notation: "compact", maximumFractionDigits: 1 });
 const usd = (value, digits = 3) => `$${value.toFixed(digits).replace(".", ",")}`;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const state = {
-  cases: [],
+  index: [],
+  details: new Map(),
+  loading: new Map(),
   current: null,
   speed: 1,
   runs: new Map(),
@@ -31,24 +36,51 @@ const state = {
   tab: "inventory",
 };
 
-// --------------------------------------------------------------------------- estado por empresa
+let footprint;
 
-function runState(slug) {
-  if (!state.runs.has(slug)) {
-    const data = caseBySlug(slug);
-    state.runs.set(slug, {
-      status: "idle", step: -1, elapsed: 0, revealed: new Set(),
-      agents: data.agents.map(() => ({ status: "pending", lines: 0, tokens: 0, requests: 0, cost: 0 })),
-    });
+// --------------------------------------------------------------------------- datos
+
+const summaryOf = (slug) => state.index.find((c) => c.slug === slug);
+const detailOf = (slug) => state.details.get(slug);
+
+function loadDetail(slug) {
+  if (state.details.has(slug)) return Promise.resolve(state.details.get(slug));
+  if (!state.loading.has(slug)) {
+    state.loading.set(slug, fetch(`/data/cases/${slug}.json`).then((r) => r.json()).then((data) => {
+      data.byStep = new Map();
+      for (const loc of data.locations) {
+        if (!data.byStep.has(loc.step)) data.byStep.set(loc.step, []);
+        data.byStep.get(loc.step).push(loc);
+      }
+      state.details.set(slug, data);
+      return data;
+    }));
   }
-  return state.runs.get(slug);
+  return state.loading.get(slug);
 }
 
-const caseBySlug = (slug) => state.cases.find((c) => c.slug === slug);
-const current = () => caseBySlug(state.current);
+function freshRun(data, status = "idle") {
+  return {
+    status, elapsed: 0, revealed: [], revealedIds: new Set(), countries: new Set(), layerCounts: {},
+    agents: data ? data.agents.map(() => ({ status: "pending", lines: 0, tokens: 0, requests: 0, cost: 0, records: 0, progress: 0 })) : [],
+  };
+}
 
-function revealedLocations(data, run) {
-  return data.locations.filter((loc) => run.revealed.has(loc.id));
+function runState(slug) {
+  if (!state.runs.has(slug)) state.runs.set(slug, freshRun(detailOf(slug)));
+  const run = state.runs.get(slug);
+  if (!run.agents.length && detailOf(slug)) run.agents = freshRun(detailOf(slug)).agents;
+  return run;
+}
+
+function reveal(run, locations) {
+  for (const loc of locations) {
+    if (run.revealedIds.has(loc.id)) continue;
+    run.revealedIds.add(loc.id);
+    run.revealed.push(loc);
+    if (loc.country) run.countries.add(loc.country);
+    run.layerCounts[loc.layer] = (run.layerCounts[loc.layer] || 0) + 1;
+  }
 }
 
 function placeOf(headquarters) {
@@ -56,29 +88,36 @@ function placeOf(headquarters) {
   return parts.slice(-2).join(", ");
 }
 
+function hostOf(url) {
+  try { return url ? new URL(url).hostname.replace(/^www\./, "") : ""; } catch { return ""; }
+}
+
 // --------------------------------------------------------------------------- bandeja
 
 function renderQueue() {
   const term = els.queueSearch.value.trim().toLowerCase();
   els.queueList.replaceChildren();
-  const visible = state.cases.filter((c) => !term || `${c.name} ${c.sector} ${c.headquarters}`.toLowerCase().includes(term));
-  for (const data of visible) {
-    const run = runState(data.slug);
-    const item = document.createElement("button");
-    item.type = "button";
-    item.className = "queue-item" + (data.slug === state.current ? " is-selected" : "");
-    item.setAttribute("role", "listitem");
-    const label = { idle: "Pendiente", running: "Analizando", done: "Completado" }[run.status];
-    const detail = run.status === "done" ? `${data.totals.locations} localizaciones · ${data.totals.countries} ${data.totals.countries === 1 ? "país" : "países"}` : placeOf(data.headquarters);
-    item.innerHTML = `
-      <span class="queue-item-top"><span class="queue-sector">${escapeHtml(data.sector)}</span>
-      <span class="state-pill" data-state="${run.status}">${label}</span></span>
-      <span class="queue-name">${escapeHtml(data.name)}</span>
-      <span class="queue-meta">${escapeHtml(detail)}</span>`;
-    item.addEventListener("click", () => selectCase(data.slug));
-    els.queueList.append(item);
+  for (const item of state.index) {
+    if (term && !`${item.name} ${item.sector} ${item.headquarters}`.toLowerCase().includes(term)) continue;
+    const run = runState(item.slug);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "queue-item" + (item.slug === state.current ? " is-selected" : "");
+    button.setAttribute("role", "listitem");
+    const t = item.totals;
+    const detail = run.status === "done"
+      ? `${number.format(t.locations)} localizaciones · ${t.countries} ${t.countries === 1 ? "país" : "países"}`
+      : placeOf(item.headquarters);
+    button.innerHTML = `
+      <span class="queue-item-top"><span class="queue-sector">${escapeHtml(item.sector)}</span>
+      <span class="state-pill" data-state="${run.status}">${STATE_LABEL[run.status]}</span></span>
+      <span class="queue-name">${escapeHtml(item.name)}</span>
+      <span class="queue-meta">${escapeHtml(detail)}</span>
+      ${item.hasConnectors ? '<span class="queue-tag">Flujo + conectores sectoriales</span>' : ""}`;
+    button.addEventListener("click", () => selectCase(item.slug));
+    els.queueList.append(button);
   }
-  els.queueCount.textContent = state.cases.filter((c) => runState(c.slug).status !== "done").length;
+  els.queueCount.textContent = state.index.filter((c) => runState(c.slug).status !== "done").length;
 }
 
 function renderLegend() {
@@ -89,37 +128,39 @@ function renderLegend() {
 // --------------------------------------------------------------------------- cabecera e indicadores
 
 function renderHero() {
-  const data = current();
-  const run = runState(data.slug);
-  els.sectorChip.textContent = data.sector;
-  els.companyName.textContent = data.name;
-  const brands = data.profile.brands.length;
-  els.companyMeta.innerHTML = `Sede <b>${escapeHtml(placeOf(data.headquarters) || "—")}</b>` +
-    (data.profile.parent ? ` · Matriz <b>${escapeHtml(data.profile.parent)}</b>` : "") +
-    (brands ? ` · ${brands} ${brands === 1 ? "marca" : "marcas"}` : "");
-  const label = { idle: "Pendiente", running: "Analizando", done: "Completado" }[run.status];
-  els.stateChip.textContent = label;
+  const item = summaryOf(state.current);
+  const run = runState(item.slug);
+  els.sectorChip.textContent = item.sector;
+  els.companyName.textContent = item.name;
+  els.companyMeta.innerHTML = `Sede <b>${escapeHtml(placeOf(item.headquarters) || "—")}</b>` +
+    (item.parent ? ` · Matriz <b>${escapeHtml(item.parent)}</b>` : "") +
+    (item.brands ? ` · ${item.brands} ${item.brands === 1 ? "marca" : "marcas"}` : "");
+  els.stateChip.textContent = STATE_LABEL[run.status];
   els.stateChip.dataset.state = run.status;
+  els.flowNote.textContent = item.hasConnectors ? "Agentes + conectores sectoriales" : "Proceso secuencial · gpt-4o-mini";
   renderProgress();
 }
 
 function renderProgress() {
-  const data = current();
-  const run = runState(data.slug);
+  const item = summaryOf(state.current);
+  const data = detailOf(item.slug);
+  const run = runState(item.slug);
+  const total = item.totals.steps;
+  const noun = item.hasConnectors ? "pasos" : "agentes";
   const done = run.agents.filter((a) => a.status === "done").length;
-  const total = data.agents.length;
   const running = run.agents.findIndex((a) => a.status === "running");
-  if (run.status === "idle") els.runStep.textContent = `${total} agentes listos`;
+  if (!data) els.runStep.textContent = "Preparando el flujo…";
+  else if (run.status === "idle") els.runStep.textContent = `${total} ${noun} listos`;
   else if (run.status === "done") els.runStep.textContent = `Análisis completado · ${total}/${total}`;
   else {
     const active = running >= 0 ? running : Math.min(done, total - 1);
     els.runStep.textContent = `${data.agents[active].label} · ${active + 1}/${total}`;
   }
   const partial = running >= 0 ? run.agents[running].progress || 0 : 0;
-  els.runBar.style.width = `${((done + partial) / total) * 100}%`;
+  els.runBar.style.width = `${total ? ((done + partial) / total) * 100 : 0}%`;
   const seconds = Math.floor(run.elapsed / 1000);
   els.runClock.textContent = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
-  els.runButton.disabled = run.status === "running";
+  els.runButton.disabled = run.status === "running" || !data;
   els.runButton.classList.toggle("is-running", run.status === "running");
   els.runButtonText.textContent = run.status === "running" ? "Analizando…" : run.status === "done" ? "Volver a ejecutar" : "Ejecutar análisis";
 }
@@ -135,38 +176,59 @@ function setKpi(key, text) {
 }
 
 function renderKpis() {
-  const data = current();
-  const run = runState(data.slug);
-  const shown = revealedLocations(data, run);
-  const sum = (field) => run.agents.reduce((acc, a) => acc + a[field], 0);
+  const item = summaryOf(state.current);
+  const data = detailOf(item.slug);
+  const run = runState(item.slug);
+  const shown = run.revealed;
   setKpi("locations", number.format(shown.length));
-  setKpi("countries", number.format(new Set(shown.map((l) => l.country).filter(Boolean)).size));
-  const geocoded = run.agents[7].status === "done";
-  const exported = run.agents[8].status === "done";
-  setKpi("geo", geocoded && shown.length ? `${Math.round((shown.filter((l) => Number.isFinite(l.lat)).length / shown.length) * 100)} %` : "—");
-  setKpi("source", exported ? `${Math.round((data.totals.withSource / data.totals.locations) * 100)} %` : "—");
-  setKpi("requests", number.format(Math.round(sum("requests"))));
-  setKpi("tokens", compact.format(Math.round(sum("tokens"))));
-  setKpi("cost", usd(sum("cost")));
+  setKpi("countries", number.format(run.countries.size));
+  const stepDone = (task) => data && run.agents[data.agents.findIndex((a) => a.task === task)]?.status === "done";
+  const geocoded = stepDone("geocode_all_locations");
+  const exported = stepDone("export_consolidated_data");
+  const withCoords = shown.reduce((acc, l) => acc + (Number.isFinite(l.lat) ? 1 : 0), 0);
+  setKpi("geo", (geocoded || exported) && shown.length ? `${Math.round((withCoords / shown.length) * 100)} %` : "—");
+  setKpi("source", exported ? `${Math.round((item.totals.withSource / item.totals.locations) * 100)} %` : "—");
+
+  if (item.hasCost) {
+    els.kpiLabel.requests.textContent = "Llamadas al modelo";
+    els.kpiLabel.tokens.textContent = "Tokens";
+    els.kpiLabel.cost.textContent = "Coste estimado";
+    const sum = (field) => run.agents.reduce((acc, a) => acc + a[field], 0);
+    setKpi("requests", number.format(Math.round(sum("requests"))));
+    setKpi("tokens", compact.format(Math.round(sum("tokens"))));
+    setKpi("cost", usd(sum("cost")));
+  } else {
+    els.kpiLabel.requests.textContent = "Pasos completados";
+    els.kpiLabel.tokens.textContent = "Registros de conectores";
+    els.kpiLabel.cost.textContent = "Dominios de fuente";
+    const done = run.agents.filter((a) => a.status === "done").length;
+    const connectorRecords = data ? data.agents.reduce((acc, agent, i) => acc + (agent.kind === "connector" ? run.agents[i].records : 0), 0) : 0;
+    setKpi("requests", `${done}/${item.totals.steps}`);
+    setKpi("tokens", number.format(Math.round(connectorRecords)));
+    setKpi("cost", exported ? number.format(item.totals.sources) : "—");
+  }
 }
 
-// --------------------------------------------------------------------------- flujo de agentes
+// --------------------------------------------------------------------------- flujo
 
 function renderFlow() {
-  const data = current();
-  const run = runState(data.slug);
+  const data = detailOf(state.current);
   els.flowList.replaceChildren();
+  if (!data) {
+    els.flowList.innerHTML = '<p class="flow-loading">Cargando el flujo…</p>';
+    return;
+  }
   let lastStage = null;
   data.agents.forEach((agent, index) => {
     if (agent.stage !== lastStage) {
       const stage = document.createElement("p");
       stage.className = "flow-stage";
-      stage.textContent = `${STAGES[agent.stage]}`;
+      stage.textContent = STAGES[agent.stage] || agent.stage;
       els.flowList.append(stage);
       lastStage = agent.stage;
     }
     const node = document.createElement("div");
-    node.className = "agent";
+    node.className = "agent" + (agent.kind === "connector" ? " agent-connector" : "");
     node.dataset.index = index;
     node.innerHTML = `
       <button class="agent-row" type="button">
@@ -180,8 +242,7 @@ function renderFlow() {
         <div class="agent-stats"></div>
       </div>`;
     node.querySelector(".agent-row").addEventListener("click", () => {
-      const s = runState(data.slug).agents[index];
-      if (s.status !== "done") return;
+      if (runState(data.slug).agents[index].status !== "done") return;
       state.openAgent = state.openAgent === index ? null : index;
       for (const other of els.flowList.querySelectorAll(".agent")) other.classList.toggle("is-open", Number(other.dataset.index) === state.openAgent);
     });
@@ -191,7 +252,8 @@ function renderFlow() {
 }
 
 function updateAgent(index) {
-  const data = current();
+  const data = detailOf(state.current);
+  if (!data) return;
   const run = runState(data.slug);
   const agent = data.agents[index];
   const s = run.agents[index];
@@ -201,7 +263,9 @@ function updateAgent(index) {
   node.classList.toggle("is-open", state.openAgent === index && s.status === "done");
   node.querySelector(".agent-row").disabled = s.status !== "done";
   const metric = node.querySelector(".agent-metric");
-  metric.textContent = s.status === "pending" ? "—" : `${compact.format(Math.round(s.tokens))} tok`;
+  if (s.status === "pending") metric.textContent = "—";
+  else if (data.hasCost) metric.textContent = `${compact.format(Math.round(s.tokens))} tok`;
+  else metric.textContent = `${compact.format(Math.round(s.records))} reg.`;
 
   const log = node.querySelector(".agent-log");
   const lines = agent.log.slice(0, s.lines);
@@ -216,28 +280,30 @@ function updateAgent(index) {
   }
   if (s.status === "done") log.querySelector(".is-typing")?.classList.remove("is-typing");
 
-  node.querySelector(".agent-stats").innerHTML = s.status === "pending" ? "" :
-    `<span>Modelo <b>${escapeHtml(agent.model)}</b></span><span>Llamadas <b>${number.format(Math.round(s.requests))}</b></span>` +
-    `<span>Tokens <b>${number.format(Math.round(s.tokens))}</b></span><span>Coste <b>${usd(s.cost, 4)}</b></span>`;
+  const stats = node.querySelector(".agent-stats");
+  if (s.status === "pending") stats.innerHTML = "";
+  else if (data.hasCost) {
+    stats.innerHTML = `<span>Modelo <b>${escapeHtml(agent.model)}</b></span><span>Llamadas <b>${number.format(Math.round(s.requests))}</b></span>` +
+      `<span>Tokens <b>${number.format(Math.round(s.tokens))}</b></span><span>Coste <b>${usd(s.cost, 4)}</b></span>`;
+  } else {
+    stats.innerHTML = `<span>${agent.kind === "connector" ? "Conector" : "Agente"}</span>` +
+      `<span>Registros <b>${number.format(Math.round(s.records))}</b></span>` +
+      (agent.mapped ? `<span>En el mapa <b>${number.format(s.status === "done" ? agent.mapped : 0)}</b></span>` : "");
+  }
 }
 
 // --------------------------------------------------------------------------- mapa
 
-let footprint;
-
 function renderLayerToggles() {
-  const data = current();
-  const run = runState(data.slug);
-  const shown = revealedLocations(data, run);
-  const counts = {};
-  for (const loc of shown) counts[loc.layer] = (counts[loc.layer] || 0) + 1;
-  const layers = Object.keys(LAYERS).filter((key) => data.totals.layers[key]);
+  const item = summaryOf(state.current);
+  const run = runState(item.slug);
+  const layers = Object.keys(LAYERS).filter((key) => item.totals.layers[key]);
   els.layerToggles.replaceChildren(...layers.map((key) => {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "layer-toggle";
     button.setAttribute("aria-pressed", String(footprint?.visibleLayers.has(key) ?? true));
-    button.innerHTML = `<span class="layer-dot" data-layer="${key}"></span>${escapeHtml(LAYERS[key].short)} <b>${counts[key] || 0}</b>`;
+    button.innerHTML = `<span class="layer-dot" data-layer="${key}"></span>${escapeHtml(LAYERS[key].short)} <b>${number.format(run.layerCounts[key] || 0)}</b>`;
     button.addEventListener("click", () => {
       const visible = button.getAttribute("aria-pressed") !== "true";
       button.setAttribute("aria-pressed", String(visible));
@@ -248,15 +314,13 @@ function renderLayerToggles() {
 }
 
 function syncMap({ fit = true } = {}) {
-  const data = current();
-  const run = runState(data.slug);
-  const shown = revealedLocations(data, run);
-  footprint.setLocations(shown);
-  els.mapEmpty.hidden = shown.length > 0 || run.status === "done";
-  if (shown.length && fit) {
+  const run = runState(state.current);
+  footprint.setLocations(run.revealed);
+  els.mapEmpty.hidden = run.revealed.length > 0 || run.status === "done";
+  if (run.revealed.length && fit) {
     footprint.stopSpin();
-    footprint.fit(shown, { duration: 1200 });
-  } else if (!shown.length) {
+    footprint.fit(run.revealed, { duration: 1200 });
+  } else if (!run.revealed.length) {
     footprint.flyToPoint(8, 30, 1.3, 1200);
     footprint.spin();
   }
@@ -265,10 +329,9 @@ function syncMap({ fit = true } = {}) {
 // --------------------------------------------------------------------------- resultados
 
 function renderResults() {
-  const data = current();
-  const run = runState(data.slug);
-  const unlocked = run.status === "done";
-  els.resultsLocked.hidden = unlocked;
+  const run = runState(state.current);
+  const unlocked = run.status === "done" && detailOf(state.current);
+  els.resultsLocked.hidden = Boolean(unlocked);
   els.resultsLocked.querySelector("p").innerHTML = run.status === "running"
     ? "<strong>Construyendo el dataset.</strong> El inventario, el perfil y la estrategia estarán disponibles al terminar la consolidación."
     : "<strong>Sin resultados todavía.</strong> Ejecuta el análisis para construir el inventario, el perfil y la estrategia de fuentes de la empresa.";
@@ -282,33 +345,42 @@ function renderResults() {
 }
 
 function renderInventory() {
-  const data = current();
+  const data = detailOf(state.current);
+  if (!data) return;
   const term = els.inventorySearch.value.trim().toLowerCase();
   const layer = els.inventoryLayer.value;
   const layers = Object.keys(LAYERS).filter((key) => data.totals.layers[key]);
   if (els.inventoryLayer.dataset.slug !== data.slug) {
     els.inventoryLayer.innerHTML = '<option value="">Todas las capas</option>' +
-      layers.map((key) => `<option value="${key}">${escapeHtml(LAYERS[key].label)} (${data.totals.layers[key]})</option>`).join("");
+      layers.map((key) => `<option value="${key}">${escapeHtml(LAYERS[key].label)} (${number.format(data.totals.layers[key])})</option>`).join("");
     els.inventoryLayer.dataset.slug = data.slug;
   }
-  const rows = data.locations.filter((loc) => (!layer || loc.layer === layer) &&
-    (!term || `${loc.name} ${loc.type} ${loc.city} ${loc.region} ${loc.country}`.toLowerCase().includes(term)));
-  els.inventoryCount.textContent = `${rows.length} de ${data.locations.length} registros`;
+  const rows = [];
+  let matches = 0;
+  for (const loc of data.locations) {
+    if (layer && loc.layer !== layer) continue;
+    if (term && !`${loc.name} ${loc.type || ""} ${loc.city || ""} ${loc.region || ""} ${loc.country || ""}`.toLowerCase().includes(term)) continue;
+    matches += 1;
+    if (rows.length < INVENTORY_LIMIT) rows.push(loc);
+  }
+  els.inventoryCount.textContent = matches > rows.length
+    ? `Mostrando ${number.format(rows.length)} de ${number.format(matches)} · filtra para acotar`
+    : `${number.format(matches)} de ${number.format(data.locations.length)} registros`;
   els.inventoryBody.replaceChildren(...rows.map((loc) => {
     const tr = document.createElement("tr");
     tr.dataset.id = loc.id;
     tr.classList.toggle("is-selected", loc.id === state.selectedId);
-    let host = "";
-    try { host = loc.sourceUrl ? new URL(loc.sourceUrl).hostname.replace(/^www\./, "") : ""; } catch { host = ""; }
+    const host = hostOf(loc.sourceUrl);
+    const where = [loc.city || loc.region, loc.country].filter(Boolean).join(", ");
     tr.innerHTML = `
       <td><span class="layer-chip"><span class="layer-dot" data-layer="${loc.layer}"></span>${escapeHtml(LAYERS[loc.layer].short)}</span></td>
-      <td><strong>${escapeHtml(loc.name)}</strong>${loc.relationship ? `<small>${escapeHtml(loc.relationship)}</small>` : ""}</td>
-      <td>${escapeHtml(loc.type || "—")}${loc.subtype && loc.subtype !== loc.type ? `<small>${escapeHtml(loc.subtype)}</small>` : ""}</td>
-      <td>${escapeHtml([loc.city, loc.country].filter(Boolean).join(", ") || "—")}<small>${Number.isFinite(loc.lat) ? `${loc.lat.toFixed(3)}, ${loc.lon.toFixed(3)}` : ""}</small></td>
+      <td><strong>${escapeHtml(loc.name)}</strong>${loc.relationship || loc.owner ? `<small>${escapeHtml(loc.relationship || `Titular: ${loc.owner}`)}</small>` : ""}</td>
+      <td>${escapeHtml(loc.type || "—")}${loc.capacity ? `<small>${escapeHtml(loc.capacity)}</small>` : loc.subtype && loc.subtype !== loc.type ? `<small>${escapeHtml(loc.subtype)}</small>` : ""}</td>
+      <td>${escapeHtml(where || "—")}<small>${Number.isFinite(loc.lat) ? `${loc.lat.toFixed(3)}, ${loc.lon.toFixed(3)}` : "Sin coordenadas"}</small></td>
       <td>${escapeHtml(loc.status || "—")}</td>
-      <td>${loc.sourceUrl ? `<a href="${escapeHtml(loc.sourceUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(host)} ↗</a>` : "—"}</td>`;
+      <td>${loc.sourceUrl ? `<a href="${escapeHtml(loc.sourceUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(host)} ↗</a>` : escapeHtml(loc.source || "—")}</td>`;
     tr.addEventListener("click", (event) => {
-      if (event.target.closest("a")) return;
+      if (event.target.closest("a") || !Number.isFinite(loc.lat)) return;
       document.querySelector(".map-panel").scrollIntoView({ behavior: "smooth", block: "nearest" });
       footprint.select(loc.id);
     });
@@ -316,7 +388,7 @@ function renderInventory() {
   }));
 }
 
-function list(items, empty = "—") {
+function chips(items, empty = "—") {
   return items?.length ? `<div class="chips">${items.map((i) => `<span>${escapeHtml(i)}</span>`).join("")}</div>` : `<p>${empty}</p>`;
 }
 
@@ -330,16 +402,16 @@ function links(urls) {
 }
 
 function renderProfile() {
-  const p = current().profile;
+  const p = detailOf(state.current).profile;
   els.tabProfile.innerHTML = `
     <div class="profile-grid">
       <article class="info-card"><h3>Razón social</h3><p class="info-big">${escapeHtml(p.canonicalName)}</p>${p.parent ? `<p>Matriz: ${escapeHtml(p.parent)}</p>` : ""}</article>
       <article class="info-card"><h3>Sede</h3><p class="info-big">${escapeHtml(placeOf(p.headquarters) || "—")}</p><p>${escapeHtml(p.headquarters)}</p></article>
       <article class="info-card"><h3>Identificadores públicos</h3>${kv(p.identifiers)}</article>
       <article class="info-card"><h3>Códigos de actividad</h3>${kv(p.activityCodes)}</article>
-      <article class="info-card"><h3>Marcas</h3>${list(p.brands)}</article>
-      <article class="info-card"><h3>Filiales principales</h3>${list(p.subsidiaries)}</article>
-      <article class="info-card"><h3>Países de operación</h3>${list(p.countries)}</article>
+      <article class="info-card"><h3>Marcas</h3>${chips(p.brands)}</article>
+      <article class="info-card"><h3>Filiales principales</h3>${chips(p.subsidiaries)}</article>
+      <article class="info-card"><h3>Países de operación</h3>${chips(p.countries)}</article>
       <article class="info-card"><h3>Webs oficiales</h3>${links(p.websites)}</article>
       ${p.summary ? `<article class="info-card info-card-wide"><h3>Resumen sectorial</h3><p>${escapeHtml(p.summary)}</p></article>` : ""}
       <article class="info-card info-card-wide"><h3>Fuentes del perfil</h3>${links(p.sources)}</article>
@@ -347,26 +419,31 @@ function renderProfile() {
 }
 
 function renderStrategy() {
-  const plan = current().plan;
+  const data = detailOf(state.current);
+  const plan = data.plan;
+  const connectors = data.agents.filter((a) => a.kind === "connector");
   els.tabStrategy.innerHTML = `
     <div class="profile-grid">
-      <article class="info-card"><h3>Sector operativo</h3><p class="info-big">${escapeHtml(plan.sector)}</p><p>Confianza ${escapeHtml(plan.confidence)}</p></article>
+      <article class="info-card"><h3>Sector operativo</h3><p class="info-big">${escapeHtml(plan.sector || "—")}</p>${plan.confidence ? `<p>Confianza ${escapeHtml(plan.confidence)}</p>` : ""}</article>
       <article class="info-card info-card-wide"><h3>Orden de conectores</h3>
-        <div class="chain">${plan.connectors.map((c, i) => `${i ? "<i>→</i>" : ""}<span><em>${i + 1}</em>${escapeHtml(c)}</span>`).join("")}</div></article>
+        ${plan.connectors.length ? `<div class="chain">${plan.connectors.map((c, i) => `${i ? "<i>→</i>" : ""}<span><em>${i + 1}</em>${escapeHtml(c)}</span>`).join("")}</div>` : "<p>—</p>"}</article>
+      ${connectors.length ? `<article class="info-card info-card-wide"><h3>Conectores sectoriales ejecutados</h3>
+        <ul class="dataset-list">${connectors.map((c) => `<li><span>${escapeHtml(c.label)}</span><b>${number.format(c.records)} registros</b></li>`).join("")}</ul></article>` : ""}
       ${plan.notes ? `<article class="info-card info-card-wide"><h3>Criterio del planificador</h3><p class="quote">${escapeHtml(plan.notes)}</p></article>` : ""}
-      <article class="info-card"><h3>Consultas de marca</h3>${list(plan.brandQueries)}</article>
-      <article class="info-card"><h3>Consultas de filiales</h3>${list(plan.subsidiaryQueries)}</article>
+      <article class="info-card"><h3>Consultas de marca</h3>${chips(plan.brandQueries)}</article>
+      <article class="info-card"><h3>Consultas de filiales</h3>${chips(plan.subsidiaryQueries)}</article>
     </div>`;
 }
 
 function renderExport() {
-  const data = current();
-  const names = { assets: "physical_assets", offices: "global_offices", entities: "operational_entities", brand: "brand_locations_discovered", other: "geocoded_locations" };
+  const data = detailOf(state.current);
+  const names = { assets: "physical_assets", offices: "global_offices", entities: "operational_entities",
+    brand: "brand_locations_discovered", linked: "linked_assets", charging: "charging_points", other: "geocoded_locations" };
   els.tabExport.innerHTML = `
     <div class="export-grid">
       <article class="export-card"><h3>Vista maestra (CSV)</h3>
-        <p>Todas las localizaciones deduplicadas, con capa, dirección normalizada, coordenadas y URL de la fuente.</p>
-        <code>all_locations_master.csv · ${data.locations.length} filas</code>
+        <p>Todas las localizaciones deduplicadas, con capa, dirección, coordenadas y fuente de cada registro.</p>
+        <code>all_locations_master.csv · ${number.format(data.locations.length)} filas</code>
         <button class="btn btn-light btn-sm" type="button" data-export="csv">Descargar CSV</button></article>
       <article class="export-card"><h3>Dataset completo (JSON)</h3>
         <p>Perfil corporativo, estrategia de fuentes y las capas de localizaciones en un único documento.</p>
@@ -374,23 +451,24 @@ function renderExport() {
         <button class="btn btn-light btn-sm" type="button" data-export="json">Descargar JSON</button></article>
       <article class="export-card"><h3>Capas generadas</h3>
         <ul class="dataset-list"><li><code>company_profile</code><b>1</b></li>
-        ${Object.entries(data.totals.layers).map(([k, v]) => `<li><code>${names[k]}</code><b>${v}</b></li>`).join("")}</ul></article>
+        ${Object.entries(data.totals.layers).map(([k, v]) => `<li><code>${names[k] || k}</code><b>${number.format(v)}</b></li>`).join("")}</ul></article>
     </div>`;
   els.tabExport.querySelectorAll("[data-export]").forEach((button) => button.addEventListener("click", () => download(button.dataset.export)));
 }
 
 function download(kind) {
-  const data = current();
+  const data = detailOf(state.current);
   let blob;
   let name;
   if (kind === "csv") {
-    const header = ["layer", "name", "type", "address", "city", "region", "country", "postal_code", "latitude", "longitude", "status", "confidence", "source_url"];
+    const header = ["layer", "name", "type", "address", "city", "region", "country", "postal_code", "latitude", "longitude", "status", "owner", "capacity", "source"];
     const cell = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-    const rows = data.locations.map((l) => [LAYERS[l.layer].label, l.name, l.type, l.address, l.city, l.region, l.country, l.postalCode, l.lat, l.lon, l.status, l.confidence, l.sourceUrl].map(cell).join(","));
+    const rows = data.locations.map((l) => [LAYERS[l.layer].label, l.name, l.type, l.address, l.city, l.region, l.country, l.postalCode,
+      l.lat, l.lon, l.status, l.owner, l.capacity, l.sourceUrl || l.source].map(cell).join(","));
     blob = new Blob(["﻿" + [header.join(","), ...rows].join("\n")], { type: "text/csv;charset=utf-8" });
     name = `${data.slug}_all_locations_master.csv`;
   } else {
-    const { agents, ...rest } = data;
+    const { agents, byStep, ...rest } = data;
     blob = new Blob([JSON.stringify(rest, null, 2)], { type: "application/json" });
     name = `${data.slug}_footprint.json`;
   }
@@ -412,23 +490,61 @@ function toast(title, detail) {
 
 // --------------------------------------------------------------------------- ejecución
 
-function agentDuration(agent) {
-  return Math.min(7600, Math.max(2300, 1500 + agent.requests * 200));
+function stepDuration(agent) {
+  if (agent.kind === "connector") return 5200;
+  if (agent.requests) return Math.min(7600, Math.max(2300, 1500 + agent.requests * 200));
+  return Math.min(6000, Math.max(2600, 2200 + agent.records * 140));
+}
+
+async function revealStep(slug, run, locations, isCurrent) {
+  if (!locations?.length) return;
+  if (locations.length <= 40) {
+    for (const loc of locations) {
+      if (state.runs.get(slug) !== run) return;
+      reveal(run, [loc]);
+      if (isCurrent()) {
+        els.mapEmpty.hidden = true;
+        footprint.stopSpin();
+        footprint.addLocations([loc]);
+        renderKpis();
+      }
+      await sleep(Math.max(40, 110 / state.speed));
+    }
+  } else {
+    // Miles de puntos: se incorporan por lotes, con destellos solo en una muestra.
+    const batches = 14;
+    const size = Math.ceil(locations.length / batches);
+    for (let i = 0; i < locations.length; i += size) {
+      if (state.runs.get(slug) !== run) return;
+      const batch = locations.slice(i, i + size);
+      reveal(run, batch);
+      if (isCurrent()) {
+        els.mapEmpty.hidden = true;
+        footprint.stopSpin();
+        footprint.addLocations(batch, { maxPulses: 3 });
+        renderKpis();
+        renderLayerToggles();
+      }
+      await sleep(Math.max(60, 170 / state.speed));
+    }
+  }
+  if (isCurrent()) {
+    renderLayerToggles();
+    footprint.fit(run.revealed, { duration: 1300 });
+  }
 }
 
 async function runCase(slug) {
-  const data = caseBySlug(slug);
-  const fresh = { status: "running", step: 0, elapsed: 0, revealed: new Set(),
-    agents: data.agents.map(() => ({ status: "pending", lines: 0, tokens: 0, requests: 0, cost: 0, progress: 0 })) };
-  state.runs.set(slug, fresh);
-  const run = fresh;
+  const data = await loadDetail(slug);
+  const run = freshRun(data, "running");
+  state.runs.set(slug, run);
   const isCurrent = () => state.current === slug && state.runs.get(slug) === run;
   if (isCurrent()) { state.openAgent = null; renderAll({ fit: false }); }
 
   let lastTick = performance.now();
   const clock = setInterval(() => {
     const now = performance.now();
-    run.elapsed += (now - lastTick);
+    run.elapsed += now - lastTick;
     lastTick = now;
     if (isCurrent()) renderProgress();
   }, 250);
@@ -438,10 +554,9 @@ async function runCase(slug) {
     const agent = data.agents[index];
     const s = run.agents[index];
     s.status = "running";
-    run.step = index;
     if (isCurrent()) { updateAgent(index); renderProgress(); renderQueue(); }
 
-    const base = agentDuration(agent);
+    const base = stepDuration(agent);
     const lineCount = agent.log.length;
     let progress = 0;
     let last = performance.now();
@@ -450,49 +565,33 @@ async function runCase(slug) {
       s.lines = Math.min(lineCount, Math.floor(progress * lineCount) + 1);
       const eased = 1 - Math.pow(1 - progress, 1.6);
       s.tokens = agent.tokens * eased;
-      s.requests = Math.max(1, agent.requests * eased);
+      s.requests = agent.requests ? Math.max(1, agent.requests * eased) : 0;
       s.cost = agent.costUsd * eased;
+      s.records = agent.records * eased;
       if (isCurrent()) { updateAgent(index); renderKpis(); }
       if (progress >= 1) break;
       await sleep(140);
       const now = performance.now();
-      // La velocidad se lee en cada paso para que cambiarla afecte también al agente en curso.
+      // La velocidad se lee en cada paso para que cambiarla afecte también al paso en curso.
       progress = Math.min(1, progress + ((now - last) * state.speed) / base);
       last = now;
     }
-    s.status = "done";
-    s.lines = lineCount;
-    s.tokens = agent.tokens;
-    s.requests = agent.requests;
-    s.cost = agent.costUsd;
-    s.progress = 0;
-
-    const newOnes = data.locations.filter((loc) => agent.reveals.includes(loc.id));
+    Object.assign(s, { status: "done", lines: lineCount, tokens: agent.tokens, requests: agent.requests, cost: agent.costUsd, records: agent.records, progress: 0 });
     if (isCurrent()) { updateAgent(index); renderProgress(); renderKpis(); }
-    if (newOnes.length) {
-      for (const loc of newOnes) run.revealed.add(loc.id);
-      if (isCurrent()) {
-        els.mapEmpty.hidden = true;
-        footprint.stopSpin();
-        for (const loc of newOnes) {
-          footprint.addLocations([loc]);
-          renderKpis();
-          await sleep(Math.max(40, 110 / state.speed));
-        }
-        renderLayerToggles();
-        footprint.fit(revealedLocations(data, run), { duration: 1300 });
-      }
-    }
+    await revealStep(slug, run, data.byStep.get(agent.task), isCurrent);
     await sleep(350 / state.speed);
   }
 
   clearInterval(clock);
   if (state.runs.get(slug) !== run) return;
+  // Registros sin paso propio (no debería haberlos) entran en la consolidación.
+  reveal(run, data.locations);
   run.status = "done";
   run.elapsed += performance.now() - lastTick;
   if (isCurrent()) {
     renderAll({ fit: true });
-    toast("Análisis completado", `${data.name}: ${data.totals.locations} localizaciones en ${data.totals.countries} ${data.totals.countries === 1 ? "país" : "países"}`);
+    const t = data.totals;
+    toast("Análisis completado", `${data.name}: ${number.format(t.locations)} localizaciones en ${t.countries} ${t.countries === 1 ? "país" : "países"}`);
   } else {
     renderQueue();
   }
@@ -510,8 +609,8 @@ function renderAll({ fit = true } = {}) {
   renderResults();
 }
 
-function selectCase(slug) {
-  if (!caseBySlug(slug)) return;
+async function selectCase(slug, { autorun = false } = {}) {
+  if (!summaryOf(slug)) return;
   state.current = slug;
   state.openAgent = null;
   state.selectedId = null;
@@ -519,8 +618,14 @@ function selectCase(slug) {
   els.inventoryLayer.value = "";
   const url = new URL(location.href);
   url.searchParams.set("empresa", slug);
+  url.searchParams.delete("ejecutar");
   history.replaceState(null, "", url);
   renderAll({ fit: true });
+  await loadDetail(slug);
+  if (state.current !== slug) return;
+  runState(slug);
+  renderAll({ fit: false });
+  if (autorun) runCase(slug);
 }
 
 function bindControls() {
@@ -547,7 +652,11 @@ function bindControls() {
     });
     renderResults();
   }));
-  els.inventorySearch.addEventListener("input", renderInventory);
+  let searchTimer;
+  els.inventorySearch.addEventListener("input", () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(renderInventory, 120);
+  });
   els.inventoryLayer.addEventListener("change", renderInventory);
 }
 
@@ -560,14 +669,12 @@ async function init() {
       els.inventoryBody.querySelectorAll("tr").forEach((tr) => tr.classList.toggle("is-selected", tr.dataset.id === loc.id));
     },
   });
-  const response = await fetch("/data/cases.json");
-  const payload = await response.json();
-  state.cases = payload.cases;
+  const { cases } = await (await fetch("/data/index.json")).json();
+  state.index = cases;
   bindControls();
   const params = new URLSearchParams(location.search);
   const requested = params.get("empresa");
-  selectCase(caseBySlug(requested) ? requested : state.cases[0].slug);
-  if (params.has("ejecutar")) runCase(state.current);
+  await selectCase(summaryOf(requested) ? requested : cases[0].slug, { autorun: params.has("ejecutar") });
 }
 
 init();
