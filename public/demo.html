@@ -64,6 +64,7 @@
             <span class="run-clock" id="runClock">00:00</span>
           </div>
           <div class="run-bar" aria-hidden="true"><span id="runBar"></span></div>
+          <p class="run-source" id="runSource" aria-live="off"></p>
           <div class="run-actions">
             <button class="btn btn-primary" id="runButton" type="button">
               <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6 4.5v11l9-5.5z"/></svg>
@@ -139,13 +140,13 @@
           <div class="tabs" role="tablist" aria-label="Vistas del resultado">
             <button type="button" role="tab" data-tab="inventory" class="is-active" aria-selected="true">Inventario</button>
             <button type="button" role="tab" data-tab="profile" aria-selected="false">Perfil corporativo</button>
-            <button type="button" role="tab" data-tab="strategy" aria-selected="false">Estrategia de fuentes</button>
+            <button type="button" role="tab" data-tab="strategy" aria-selected="false">Fuentes</button>
             <button type="button" role="tab" data-tab="export" aria-selected="false">Exportar</button>
           </div>
         </div>
         <div class="results-locked" id="resultsLocked">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>
-          <p><strong>Sin resultados todavía.</strong> Ejecuta el análisis para construir el inventario, el perfil y la estrategia de fuentes de la empresa.</p>
+          <p><strong>Sin resultados todavía.</strong> Ejecuta el análisis para construir el inventario, el perfil y las fuentes de la empresa.</p>
         </div>
         <div class="tab-body" id="tabInventory" data-panel="inventory" hidden>
           <div class="inventory-tools">

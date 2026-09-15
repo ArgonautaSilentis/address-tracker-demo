@@ -4,7 +4,7 @@ const $ = (selector) => document.querySelector(selector);
 const els = {
   queueCount: $("#queueCount"), queueSearch: $("#queueSearch"), queueList: $("#queueList"), legendList: $("#legendList"),
   sectorChip: $("#sectorChip"), stateChip: $("#stateChip"), companyName: $("#companyName"), companyMeta: $("#companyMeta"),
-  runStep: $("#runStep"), runClock: $("#runClock"), runBar: $("#runBar"), runButton: $("#runButton"),
+  runStep: $("#runStep"), runClock: $("#runClock"), runBar: $("#runBar"), runButton: $("#runButton"), runSource: $("#runSource"),
   runButtonText: $("#runButtonText"), flowList: $("#flowList"), flowNote: $("#flowNote"), layerToggles: $("#layerToggles"),
   mapEmpty: $("#mapEmpty"), resultsLocked: $("#resultsLocked"), inventorySearch: $("#inventorySearch"),
   inventoryLayer: $("#inventoryLayer"), inventoryCount: $("#inventoryCount"), inventoryBody: $("#inventoryBody"),
@@ -18,6 +18,15 @@ const els = {
 
 const STAGES = { plan: "Planificación", extract: "Extracción", consolidate: "Consolidación", connectors: "Conectores sectoriales" };
 const STATE_LABEL = { idle: "Pendiente", running: "Analizando", done: "Completado" };
+const KIND_CLASS = {
+  "Web oficial": "official", "Google Places": "places", "GEM Wiki": "gem", "Open Supply Hub": "osh", Wikipedia: "wiki",
+  "Registro público": "registry", "Web de terceros": "third", "Dataset del grupo": "dataset",
+};
+const PLAN_STATUS = {
+  used: ["is-used", "Consultada"], empty: ["is-empty", "Planificada, sin resultados"],
+  reserve: ["is-reserve", "Reserva: solo si falla otra fuente"], untraced: ["is-untraced", "Sin rastro en las salidas"],
+};
+const SOURCES_SHOWN = 8;
 const INVENTORY_LIMIT = 300;
 const number = new Intl.NumberFormat("es-ES");
 const compact = new Intl.NumberFormat("es-ES", { notation: "compact", maximumFractionDigits: 1 });
@@ -92,6 +101,19 @@ function hostOf(url) {
   try { return url ? new URL(url).hostname.replace(/^www\./, "") : ""; } catch { return ""; }
 }
 
+/** "airbus.com/en/about-us/our-worldwide…"; las fichas de Google Maps no tienen una ruta legible. */
+function shortUrl(item) {
+  if (!item.url) return item.label || item.kind;
+  if (/^maps\.google\./.test(item.host)) return "Ficha en Google Maps";
+  if (item.grouped) return item.host;
+  let path = "";
+  try { path = decodeURIComponent(new URL(item.url).pathname).replace(/\/$/, ""); } catch { path = ""; }
+  const text = `${item.host}${path}`;
+  return text.length > 58 ? `${text.slice(0, 57)}…` : text;
+}
+
+const kindBadge = (kind) => `<span class="src-kind" data-kind="${KIND_CLASS[kind] || "third"}">${escapeHtml(kind)}</span>`;
+
 // --------------------------------------------------------------------------- bandeja
 
 function renderQueue() {
@@ -163,6 +185,7 @@ function renderProgress() {
   els.runButton.disabled = run.status === "running" || !data;
   els.runButton.classList.toggle("is-running", run.status === "running");
   els.runButtonText.textContent = run.status === "running" ? "Analizando…" : run.status === "done" ? "Volver a ejecutar" : "Ejecutar análisis";
+  if (run.status !== "running") renderRunSource();
 }
 
 function setKpi(key, text) {
@@ -239,6 +262,7 @@ function renderFlow() {
       <div class="agent-body">
         <div class="agent-tools">${agent.tools.length ? agent.tools.map((t) => `<span>${escapeHtml(t)}</span>`).join("") : '<span class="no-tools">Razonamiento sin herramientas</span>'}</div>
         <ul class="agent-log"></ul>
+        <div class="agent-extra"></div>
         <div class="agent-stats"></div>
       </div>`;
     node.querySelector(".agent-row").addEventListener("click", () => {
@@ -279,6 +303,8 @@ function updateAgent(index) {
     log.scrollTop = log.scrollHeight;
   }
   if (s.status === "done") log.querySelector(".is-typing")?.classList.remove("is-typing");
+  renderAgentExtra(node.querySelector(".agent-extra"), data, agent, s);
+  if (s.status === "running") renderRunSource();
 
   const stats = node.querySelector(".agent-stats");
   if (s.status === "pending") stats.innerHTML = "";
@@ -290,6 +316,85 @@ function updateAgent(index) {
       `<span>Registros <b>${number.format(Math.round(s.records))}</b></span>` +
       (agent.mapped ? `<span>En el mapa <b>${number.format(s.status === "done" ? agent.mapped : 0)}</b></span>` : "");
   }
+}
+
+/**
+ * Lo que consulta cada paso, al ritmo de la ejecución: la estrategia del planificador, las URLs que citan los
+ * registros de cada agente o los servicios de geocodificación. Todo sale de las salidas de la ejecución.
+ */
+function renderAgentExtra(container, data, agent, s) {
+  const fraction = s.status === "done" ? 1 : s.status === "running" ? s.progress : 0;
+  let html = "";
+  let key = `${s.status}`;
+  if (agent.strategy?.length) {
+    const shown = s.status === "done" ? agent.strategy.length : Math.min(agent.strategy.length, Math.floor(fraction * (agent.strategy.length + 1)));
+    key += `:${shown}`;
+    if (shown) {
+      html = `<p class="extra-title">Estrategia de fuentes</p><div class="plan-rows">${agent.strategy.slice(0, shown).map((row) => `
+        <div class="plan-row">
+          <span class="plan-need">${escapeHtml(row.need)}</span>
+          <span class="plan-sources"><b>${escapeHtml(row.lead || "—")}</b>${row.others.map((o) => `<span>${escapeHtml(o)}</span>`).join("")}</span>
+          ${row.notes ? `<span class="plan-notes">«${escapeHtml(row.notes)}»</span>` : ""}
+        </div>`).join("")}</div>` +
+        (s.status === "done" && agent.fallback ? `<p class="plan-fallback"><b>Si una fuente falla</b> «${escapeHtml(agent.fallback)}»</p>` : "");
+    }
+  } else if (agent.sources?.length) {
+    const total = agent.sources.length;
+    const found = s.status === "done" ? total : Math.min(total, Math.ceil(fraction * total));
+    key += `:${found}`;
+    if (found) {
+      const visible = agent.sources.slice(0, found);
+      // Durante la ejecución se ven las últimas en llegar; al terminar, las que más registros respaldan.
+      const list = s.status === "done" ? visible.slice(0, SOURCES_SHOWN) : visible.slice(-SOURCES_SHOWN);
+      const hidden = found - list.length;
+      html = `<p class="extra-title">Fuentes consultadas <b>${number.format(found)}${found < total ? ` de ${number.format(total)}` : ""}</b></p>
+        <ul class="src-list">${list.map((item) => `
+          <li>${kindBadge(item.kind)}
+            ${item.url ? `<a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(item.url)}">${escapeHtml(shortUrl(item))} ↗</a>` : `<span class="src-dataset">${escapeHtml(shortUrl(item))}</span>`}
+            <span class="src-count">${number.format(item.records)} ${item.records === 1 ? "reg." : "regs."}</span></li>`).join("")}</ul>` +
+        (hidden > 0 ? `<p class="src-more">y ${number.format(hidden)} ${hidden === 1 ? "fuente más" : "fuentes más"} en la pestaña Fuentes</p>` : "");
+    }
+  } else if (agent.services?.length && fraction >= 0.2) {
+    key += ":services";
+    html = `<p class="extra-title">Servicios de geocodificación</p>
+      <ul class="src-list">${agent.services.map((sv) => `<li><span class="src-kind" data-kind="places">${escapeHtml(sv.name)}</span><span class="src-dataset">${number.format(sv.records)} ${sv.records === 1 ? "registro" : "registros"}</span></li>`).join("")}</ul>`;
+  } else if (agent.task === "export_consolidated_data" && fraction >= 0.4 && data.sourceSummary?.kinds.length) {
+    key += ":kinds";
+    html = `<p class="extra-title">Citas por tipo de fuente</p>
+      <div class="kind-bars">${data.sourceSummary.kinds.map((k) => `<span>${kindBadge(k.kind)}<b>${number.format(k.cited)}</b></span>`).join("")}</div>`;
+  }
+  if (container.dataset.key === key) return;
+  container.dataset.key = key;
+  container.innerHTML = html;
+}
+
+/** La línea bajo la barra de progreso: qué fuente se está leyendo ahora mismo. */
+function renderRunSource() {
+  const data = detailOf(state.current);
+  const run = runState(state.current);
+  const el = els.runSource;
+  if (!data || run.status === "idle") { el.textContent = ""; el.hidden = true; return; }
+  el.hidden = false;
+  if (run.status === "done") {
+    const summary = data.sourceSummary;
+    el.innerHTML = `<span class="run-source-label">Fuentes</span> ${number.format(summary.domains.length)} ${summary.domains.length === 1 ? "dominio" : "dominios"} · ${number.format(data.totals.withSource)} de ${number.format(data.totals.locations)} registros con fuente`;
+    return;
+  }
+  const index = run.agents.findIndex((a) => a.status === "running");
+  if (index < 0) return;
+  const agent = data.agents[index];
+  const s = run.agents[index];
+  let text = agent.label;
+  if (agent.strategy?.length) text = "Eligiendo la fuente de cada necesidad";
+  else if (agent.sources?.length) {
+    const item = agent.sources[Math.max(0, Math.min(agent.sources.length, Math.ceil(s.progress * agent.sources.length)) - 1)];
+    text = item.url ? shortUrl(item) : `Leyendo ${shortUrl(item)}`;
+  } else if (agent.services?.length) text = `Geocodificando con ${agent.services.map((sv) => sv.name).join(" y ")}`;
+  else if (agent.task === "export_consolidated_data") text = "Deduplicando y conservando la fuente de cada registro";
+  const label = agent.sources?.length ? "Leyendo" : "Ahora";
+  if (el.dataset.text === text) return;
+  el.dataset.text = text;
+  el.innerHTML = `<span class="run-source-label">${label}</span> ${escapeHtml(text)}`;
 }
 
 // --------------------------------------------------------------------------- mapa
@@ -421,13 +526,38 @@ function renderProfile() {
 function renderStrategy() {
   const data = detailOf(state.current);
   const plan = data.plan;
+  const summary = data.sourceSummary;
+  const planner = data.agents.find((a) => a.task === "plan_source_strategy");
   const connectors = data.agents.filter((a) => a.kind === "connector");
+  const domains = summary.domains;
   els.tabStrategy.innerHTML = `
     <div class="profile-grid">
+      <article class="info-card info-card-wide"><h3>Planificado frente a consultado</h3>
+        <ol class="plan-vs">${summary.planned.map((p, i) => {
+          const [cls, label] = PLAN_STATUS[p.status];
+          return `<li class="${cls}"><em>${i + 1}</em><strong>${escapeHtml(p.name)}</strong><span>${label}${p.status === "used" ? ` · ${number.format(p.cited)} ${p.cited === 1 ? "cita" : "citas"}` : ""}</span></li>`;
+        }).join("")}</ol>
+        ${summary.unplanned.length ? `<p class="plan-extra">Fuera del plan, los agentes también citaron: ${summary.unplanned.map((u) => `${kindBadge(u.kind)} <b>${number.format(u.cited)}</b>`).join(" ")}</p>` : ""}
+        <p class="plan-help">Cada cita es un registro de un agente que apunta a esa fuente. El plan lo decide el primer agente antes de buscar nada; lo consultado sale de las salidas de cada agente.</p>
+      </article>
+      ${planner?.strategy?.length ? `<article class="info-card info-card-wide"><h3>Estrategia por necesidad</h3>
+        <div class="table-wrap"><table class="inventory sources-table"><thead><tr><th>Necesidad</th><th>Lidera</th><th>Complementan</th><th>Criterio del planificador</th></tr></thead>
+        <tbody>${planner.strategy.map((row) => `<tr><td><strong>${escapeHtml(row.need)}</strong></td><td>${escapeHtml(row.lead || "—")}</td><td>${escapeHtml(row.others.join(", ") || "—")}</td><td><small class="notes-cell">${escapeHtml(row.notes || "—")}</small></td></tr>`).join("")}</tbody></table></div>
+        ${planner.fallback ? `<p class="plan-fallback-text"><b>Si una fuente falla:</b> ${escapeHtml(planner.fallback)}</p>` : ""}
+      </article>` : ""}
+      <article class="info-card info-card-wide"><h3>Dominios consultados · ${number.format(domains.length)}</h3>
+        <div class="table-wrap"><table class="inventory sources-table"><thead><tr><th>Dominio</th><th>Tipo</th><th>En el dataset</th><th>Citas</th><th>Agentes que la citan</th></tr></thead>
+        <tbody>${domains.map((d) => `<tr>
+          <td><a href="${escapeHtml(d.url)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(d.url)}">${escapeHtml(d.host)} ↗</a></td>
+          <td>${d.kinds.map(kindBadge).join(" ")}</td>
+          <td>${number.format(d.records)}</td>
+          <td>${number.format(d.cited)}</td>
+          <td><small class="notes-cell">${escapeHtml(d.agents.join(" · ") || "—")}</small></td></tr>`).join("")}</tbody></table></div>
+        ${summary.withoutSource ? `<p class="plan-extra">${number.format(summary.withoutSource)} ${summary.withoutSource === 1 ? "registro no trae" : "registros no traen"} URL de origen en la salida del agente: se exportan sin fuente, no con una inventada.</p>` : ""}
+      </article>
       <article class="info-card"><h3>Sector operativo</h3><p class="info-big">${escapeHtml(plan.sector || "—")}</p>${plan.confidence ? `<p>Confianza ${escapeHtml(plan.confidence)}</p>` : ""}</article>
-      <article class="info-card info-card-wide"><h3>Orden de conectores</h3>
-        ${plan.connectors.length ? `<div class="chain">${plan.connectors.map((c, i) => `${i ? "<i>→</i>" : ""}<span><em>${i + 1}</em>${escapeHtml(c)}</span>`).join("")}</div>` : "<p>—</p>"}</article>
-      ${connectors.length ? `<article class="info-card info-card-wide"><h3>Conectores sectoriales ejecutados</h3>
+      ${summary.geocoding.length ? `<article class="info-card"><h3>Geocodificación</h3><ul class="dataset-list">${summary.geocoding.map((g) => `<li><span>${escapeHtml(g.name)}</span><b>${number.format(g.records)}</b></li>`).join("")}</ul></article>` : ""}
+      ${connectors.length ? `<article class="info-card"><h3>Conectores sectoriales ejecutados</h3>
         <ul class="dataset-list">${connectors.map((c) => `<li><span>${escapeHtml(c.label)}</span><b>${number.format(c.records)} registros</b></li>`).join("")}</ul></article>` : ""}
       ${plan.notes ? `<article class="info-card info-card-wide"><h3>Criterio del planificador</h3><p class="quote">${escapeHtml(plan.notes)}</p></article>` : ""}
       <article class="info-card"><h3>Consultas de marca</h3>${chips(plan.brandQueries)}</article>
@@ -492,6 +622,8 @@ function toast(title, detail) {
 
 function stepDuration(agent) {
   if (agent.kind === "connector") return 5200;
+  // El planificador no llama a herramientas, pero su estrategia tiene que dar tiempo a leerse.
+  if (agent.strategy?.length) return 5200;
   if (agent.requests) return Math.min(7600, Math.max(2300, 1500 + agent.requests * 200));
   return Math.min(6000, Math.max(2600, 2200 + agent.records * 140));
 }

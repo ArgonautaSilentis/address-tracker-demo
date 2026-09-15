@@ -60,3 +60,33 @@ test("en Iberdrola, los activos con otro titular no se atribuyen al grupo", () =
   assert.ok(foreign.length > 0);
   assert.ok(foreign.every((l) => l.layer === "linked"));
 });
+
+test("las fuentes de cada paso son URLs reales citadas por sus registros y cuadran con el resumen", () => {
+  const KINDS = new Set(["Web oficial", "Google Places", "GEM Wiki", "Open Supply Hub", "Wikipedia", "Registro público", "Web de terceros", "Dataset del grupo"]);
+  for (const data of details) {
+    const planner = data.agents.find((agent) => agent.task === "plan_source_strategy");
+    assert.ok(planner.strategy.length > 0, `${data.name}: el planificador no enseña su estrategia`);
+    const cited = new Map();
+    for (const agent of data.agents) {
+      for (const item of agent.sources || []) {
+        assert.ok(KINDS.has(item.kind), `${data.name} · ${agent.task}: tipo ${item.kind}`);
+        assert.ok(item.records > 0, `${data.name} · ${agent.task}: fuente sin registros`);
+        if (item.url) assert.match(item.url, /^https?:\/\//, `${data.name} · ${agent.task}: ${item.url}`);
+        else assert.equal(item.kind, "Dataset del grupo");
+        cited.set(item.kind, (cited.get(item.kind) || 0) + item.records);
+      }
+    }
+    const summary = data.sourceSummary;
+    for (const { kind, cited: count } of summary.kinds) assert.equal(count, cited.get(kind), `${data.name}: citas de ${kind}`);
+    for (const planned of summary.planned) {
+      if (planned.status === "used") assert.ok(planned.cited > 0, `${data.name}: ${planned.name} usada sin citas`);
+      if (planned.status === "empty") assert.ok(!cited.get(planned.name), `${data.name}: ${planned.name} sin resultados pero citada`);
+    }
+    // Todo dominio que respalda una localización del dataset figura en la tabla de dominios.
+    const hosts = new Set(summary.domains.map((d) => d.host));
+    for (const loc of data.locations) {
+      if (loc.sourceUrl) assert.ok(hosts.has(new URL(loc.sourceUrl).hostname.replace(/^www\./, "")), `${data.name}: ${loc.sourceUrl}`);
+    }
+    assert.equal(summary.withoutSource, data.locations.filter((l) => !l.sourceUrl && !l.source).length, data.name);
+  }
+});

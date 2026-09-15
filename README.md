@@ -3,7 +3,9 @@
 Portada y mesa de análisis del flujo multiagente que reconstruye la huella corporativa, operativa y geográfica de una empresa a partir de su nombre.
 
 - `/`: portada con el reto, la arquitectura de nueve agentes, las capas de salida, un explorador de resultados sobre el mapa y los casos de uso.
-- `/demo`: mesa de análisis. Se elige una empresa, se ejecuta el flujo y las localizaciones aparecen en el mapa a medida que cada agente termina. Incluye inventario filtrable, perfil corporativo, estrategia de fuentes y exportación a CSV y JSON.
+- `/demo`: mesa de análisis. Se elige una empresa, se ejecuta el flujo y las localizaciones aparecen en el mapa a medida que cada agente termina. Mientras corre, el planificador enseña qué fuente lidera cada necesidad y cada agente las URLs que citan sus registros. Incluye inventario filtrable, perfil corporativo, fuentes (planificado frente a consultado y tabla de dominios) y exportación a CSV y JSON.
+
+Las fuentes salen de las salidas de cada agente (`source_url`, `source_type`, `geocoding_source_system`) y de la estrategia del planificador; la web no inventa ninguna URL.
 
 ## Estructura
 

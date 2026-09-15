@@ -64,7 +64,7 @@ PIPELINE = [
                                                      "GEMWikiSearchTool", "OpenSupplyHubSearchTool",
                                                      "ScrapegraphSmartScraperTool"]},
     {"task": "geocode_all_locations", "agent": "Location Geocoder", "stage": "consolidate",
-     "label": "Geocodificación", "tools": ["OSMGeocodingTool"]},
+     "label": "Geocodificación", "tools": ["PlacesGeocodingTool", "OSMGeocodingTool"]},
     {"task": "export_consolidated_data", "agent": "Data Export Specialist", "stage": "consolidate",
      "label": "Consolidación y exportación", "tools": []},
 ]
@@ -83,6 +83,15 @@ CONFIDENCE = {"high": "alta", "medium": "media", "low": "baja"}
 CONNECTORS = {"official_website": "Web oficial", "official website": "Web oficial", "gem": "GEM Wiki",
               "google places": "Google Places", "open supply hub": "Open Supply Hub",
               "advanced_scraping": "Scraping avanzado", "advanced scraping": "Scraping avanzado"}
+
+# Tipos de fuente con los que se agrupan las URLs que citan los agentes. Solo se clasifican fuentes que aparecen
+# en las salidas de la ejecución: la web no inventa ninguna.
+SOURCE_KINDS = ["Web oficial", "Google Places", "GEM Wiki", "Open Supply Hub", "Wikipedia", "Registro público",
+                "Web de terceros", "Dataset del grupo"]
+NAME_STOPWORDS = {"inter", "holding", "group", "grupo", "general", "company", "netherland", "netherlands", "john",
+                  "international", "sociedad", "limited"}
+STRATEGY_NEEDS = (("corporate_profile_strategy", "Perfil corporativo"), ("physical_assets_strategy", "Activos físicos"),
+                  ("visible_locations_strategy", "Localizaciones visibles"))
 STATUS = {"active": "Operativo", "operational": "Operativo", "operating": "Operativo", "open": "Operativo",
           "in operation": "Operativo", "construction": "En construcción", "under construction": "En construcción",
           "planned": "Planificado", "announced": "Anunciado", "closed": "Cerrado", "inactive": "Inactivo",
@@ -160,7 +169,10 @@ def connector(name):
         return CONNECTORS[low]
     for needle, label in (("official", "Web oficial"), ("gem", "GEM Wiki"), ("places", "Google Places"),
                           ("supply hub", "Open Supply Hub"), ("scrap", "Scraping avanzado"),
-                          ("sector", "Datasets sectoriales"), ("search", "Búsqueda web")):
+                          ("sector", "Datasets sectoriales"), ("search", "Búsqueda web"),
+                          ("annual report", "Informes anuales"), ("report", "Informes sectoriales"),
+                          ("publication", "Publicaciones sectoriales"), ("director", "Directorios de empresas"),
+                          ("registr", "Registros mercantiles"), ("linkedin", "LinkedIn"), ("news", "Prensa")):
         if needle in low:
             return label
     return clean(name).replace("_", " ").capitalize()
@@ -200,6 +212,97 @@ def host(url):
         return urlparse(url).netloc.replace("www.", "")
     except ValueError:
         return ""
+
+
+def official_hosts(profile, name):
+    """Dominios de la propia empresa: sus webs oficiales y los que llevan su nombre."""
+    hosts = {host(u) for u in (profile.get("official_websites") or []) if clean(u)}
+    tokens = [w for w in key(name).split() if len(w) >= 4 and w not in NAME_STOPWORDS]
+    return {h for h in hosts if h}, tokens
+
+
+def source_kind(url, source_type, officials):
+    hosts, tokens = officials
+    h = host(url)
+    kind = clean(source_type).lower()
+    if "gem.wiki" in h or "globalenergymonitor" in h:
+        return "GEM Wiki"
+    if "opensupplyhub" in h:
+        return "Open Supply Hub"
+    if "places" in kind or h.startswith("maps.google") or "google.com/maps" in url:
+        return "Google Places"
+    if "wikipedia" in h:
+        return "Wikipedia"
+    compact_host = h.replace(".", "").replace("-", "")
+    if h in hosts or any(h.endswith("." + o) for o in hosts) or any(t in compact_host for t in tokens) or "official" in kind:
+        return "Web oficial"
+    if h.endswith(".gov") or ".gov." in h or "regist" in kind:
+        return "Registro público"
+    return "Web de terceros"
+
+
+def url_sources(recs, officials, url_fields=("source_url",), type_fields=("source_type", "discovery_source_system", "source_role")):
+    """Una entrada por URL citada, con cuántos registros la citan, en orden de aparición."""
+    groups = {}
+    for rec in recs:
+        url = next((clean(rec.get(f)) for f in url_fields if clean(rec.get(f))), "")
+        if not url.lower().startswith("http"):
+            continue
+        kind_hint = next((clean(rec.get(f)) for f in type_fields if clean(rec.get(f))), "")
+        item = groups.setdefault(url, {"url": url, "host": host(url), "kind": source_kind(url, kind_hint, officials), "records": 0})
+        item["records"] += 1
+    return sorted(groups.values(), key=lambda i: -i["records"])
+
+
+def host_sources(locations, officials):
+    """Para los conectores, con cientos de URLs: una entrada por dominio con una URL de ejemplo."""
+    groups = {}
+    for loc in locations:
+        url = loc.get("sourceUrl") or ""
+        if url.startswith("http"):
+            item = groups.setdefault(host(url), {"url": url, "host": host(url), "kind": source_kind(url, "", officials),
+                                                 "records": 0, "grouped": True})
+            item["records"] += 1
+        elif loc.get("source"):
+            item = groups.setdefault(loc["source"], {"url": "", "host": "", "label": loc["source"],
+                                                     "kind": "Dataset del grupo", "records": 0})
+            item["records"] += 1
+    return sorted(groups.values(), key=lambda i: -i["records"])
+
+
+def geocoding_service(raw):
+    low = clean(raw).lower()
+    if "places" in low:
+        return "Google Places"
+    if "google" in low:
+        return "Google Geocoding"
+    if "osm" in low or "openstreetmap" in low or "nominatim" in low:
+        return "OpenStreetMap"
+    return clean(raw) or "Sin geocodificar"
+
+
+def as_list(value):
+    if isinstance(value, (list, tuple)):
+        return [clean(v) for v in value if clean(v)]
+    return [clean(value)] if clean(value) else []
+
+
+def plan_strategy(plan):
+    rows = []
+    for field, need in STRATEGY_NEEDS:
+        strategy = plan.get(field) or {}
+        lead = strategy.get("lead_source") or strategy.get("primary_source")
+        others = as_list(strategy.get("additional_sources")) + as_list(strategy.get("secondary_sources")) + as_list(
+            strategy.get("secondary_source"))
+        if lead or others:
+            rows.append({"need": need, "lead": connector(lead) if lead else "", "others": [connector(o) for o in others],
+                         "notes": clean(strategy.get("notes"))})
+    fallback = plan.get("fallback_strategy") or {}
+    if isinstance(fallback, dict):
+        fallback_text = " ".join(clean(fallback.get(k)) for k in ("conditions", "notes", "strategy") if clean(fallback.get(k)))
+    else:
+        fallback_text = flat(fallback)
+    return rows, fallback_text
 
 
 def top(counter, n=5, translate=False):
@@ -561,6 +664,15 @@ def build_case(slug, run_id, plan_run, connectors_key, outputs):
     name = clean(profile.get("canonical_company_name")) or run_id.split("_", 2)[2].replace("_", " ")
     logs, order = flow_logs(out, plan, profile, name)
     locations = flow_locations(run, out)
+    officials = official_hosts(profile, name)
+    task_sources = {task: url_sources(records(out[task]), officials) for task in (
+        "hunt_all_company_assets", "map_all_global_offices", "map_operational_entities", "discover_brand_locations",
+        "enrich_physical_assets")}
+    task_sources["research_company_profile"] = [
+        {"url": u, "host": host(u), "kind": source_kind(u, "", officials), "records": 1}
+        for u in dict.fromkeys(clean(u) for u in (profile.get("source_urls") or [])) if u.startswith("http")]
+    geocoded = records(out["geocode_all_locations"])
+    services = Counter(geocoding_service(r.get("geocoding_source_system") or r.get("geocoding_source")) for r in geocoded)
 
     connector_steps = []
     if connectors_key:
@@ -593,8 +705,10 @@ def build_case(slug, run_id, plan_run, connectors_key, outputs):
             continue
         if step["task"] == "export_consolidated_data":
             for connector_step in connector_steps:
+                step_locations = [loc for loc in locations if loc["step"] == connector_step["task"]]
                 agents.append({**connector_step, "kind": "connector", "model": "", "requests": 0, "tokens": 0,
-                               "costUsd": 0, "mapped": step_counts.get(connector_step["task"], 0)})
+                               "costUsd": 0, "mapped": step_counts.get(connector_step["task"], 0),
+                               "sources": host_sources(step_locations, officials)})
         metrics = cost_by_agent.get(step["agent"], {})
         if step["task"] == "export_consolidated_data":
             task_records = len(locations)
@@ -602,10 +716,57 @@ def build_case(slug, run_id, plan_run, connectors_key, outputs):
             task_records = 1
         else:
             task_records = len(records(out[step["task"]]))
+        extra = {}
+        if step["task"] in task_sources:
+            extra["sources"] = task_sources[step["task"]]
+        elif step["task"] == "geocode_all_locations":
+            extra["services"] = [{"name": k, "records": v} for k, v in services.most_common()]
+        elif step["task"] == "plan_source_strategy":
+            extra["strategy"], extra["fallback"] = plan_strategy(plan)
         agents.append({**step, "kind": "agent", "model": metrics.get("model", "gpt-4o-mini"),
                        "requests": metrics.get("successful_requests", 0), "tokens": metrics.get("total_tokens", 0),
                        "costUsd": metrics.get("estimated_cost_usd", 0), "records": task_records,
-                       "log": logs[step["task"]], "mapped": step_counts.get(step["task"], 0)})
+                       "log": logs[step["task"]], "mapped": step_counts.get(step["task"], 0), **extra})
+
+    # Resumen de fuentes: lo que planificó el primer agente frente a lo que citan de verdad las salidas.
+    cited = Counter()
+    domains = {}
+    for agent in agents:
+        for item in agent.get("sources", []):
+            cited[item["kind"]] += item["records"]
+            if not item.get("host"):
+                continue
+            row = domains.setdefault(item["host"], {"host": item["host"], "url": item["url"], "kinds": [], "agents": [],
+                                                    "cited": 0, "records": 0})
+            row["cited"] += item["records"]
+            if item["kind"] not in row["kinds"]:
+                row["kinds"].append(item["kind"])
+            if agent["label"] not in row["agents"]:
+                row["agents"].append(agent["label"])
+    for loc in locations:
+        h = host(loc.get("sourceUrl") or "")
+        if h in domains:
+            domains[h]["records"] += 1
+        elif h:
+            domains[h] = {"host": h, "url": loc["sourceUrl"], "kinds": [source_kind(loc["sourceUrl"], "", officials)],
+                          "agents": [], "cited": 0, "records": 1}
+    planned = []
+    for name_ in order:
+        if name_ == "Scraping avanzado":
+            status = "reserve"
+        elif name_ in SOURCE_KINDS:
+            status = "used" if cited[name_] else "empty"
+        else:
+            status = "untraced"
+        planned.append({"name": name_, "status": status, "cited": cited.get(name_, 0)})
+    source_summary = {
+        "planned": planned,
+        "unplanned": [{"kind": k, "cited": cited[k]} for k in SOURCE_KINDS if cited[k] and k not in order],
+        "kinds": [{"kind": k, "cited": cited[k]} for k in SOURCE_KINDS if cited[k]],
+        "domains": sorted(domains.values(), key=lambda d: (-d["records"], -d["cited"], d["host"])),
+        "geocoding": [{"name": k, "records": v} for k, v in services.most_common()],
+        "withoutSource": sum(1 for loc in locations if not (loc.get("sourceUrl") or loc.get("source"))),
+    }
 
     layer_counts = Counter(loc["layer"] for loc in locations)
     summary = {
@@ -640,6 +801,7 @@ def build_case(slug, run_id, plan_run, connectors_key, outputs):
             "activityCodes": {k.replace("_", " "): flat(v) for k, v in (profile.get("economic_activity_codes") or {}).items() if flat(v)},
             "summary": clean(profile.get("sector_summary")), "sources": profile.get("source_urls") or [],
         },
+        "sourceSummary": source_summary,
         "agents": agents,
         "locations": locations,
     }
