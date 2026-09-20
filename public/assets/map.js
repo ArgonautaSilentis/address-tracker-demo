@@ -61,10 +61,11 @@ export function popupHtml(loc) {
 }
 
 export class FootprintMap {
-  constructor(container, { theme = "dark", globe = true, interactive = true, onSelect = null, center = [8, 30], zoom = 1.3 } = {}) {
+  constructor(container, { theme = "dark", globe = true, interactive = true, labels = true, onSelect = null, center = [8, 30], zoom = 1.3 } = {}) {
     this.container = container;
     this.theme = theme;
     this.globe = globe;
+    this.labels = labels;
     this.onSelect = onSelect;
     this.locations = [];
     this.visibleLayers = new Set(Object.keys(LAYERS));
@@ -110,7 +111,11 @@ export class FootprintMap {
 
   install() {
     const map = this.map;
-    if (this.globe) map.setProjection({ type: "globe" });
+    if (this.globe) {
+      map.setProjection({ type: "globe" });
+      this.installSky();
+    }
+    if (!this.labels) this.styleDecorative();
     if (!map.getSource(SOURCE)) {
       map.addSource(SOURCE, { type: "geojson", data: featureCollection(this.visible()), promoteId: "id" });
     }
@@ -138,6 +143,46 @@ export class FootprintMap {
     }
     this.ready = true;
     this.refresh();
+  }
+
+  // Globo decorativo: sin topónimos, con la tierra separada del agua y las fronteras
+  // apenas insinuadas. Así el planeta se lee de un vistazo y los puntos de la huella
+  // son lo único que destaca. Los ids son los del estilo de OpenFreeMap; si alguno
+  // cambia, se salta sin romper el mapa.
+  styleDecorative() {
+    const map = this.map;
+    const paint = (id, prop, value) => { if (map.getLayer(id)) map.setPaintProperty(id, prop, value); };
+    for (const layer of map.getStyle()?.layers || []) {
+      if (layer.type === "symbol") map.setLayoutProperty(layer.id, "visibility", "none");
+    }
+    if (this.theme !== "dark") return;
+    paint("background", "background-color", "#17243f");
+    paint("water", "fill-color", "#070f22");
+    for (const id of ["boundary_country_z0-4", "boundary_country_z5-"]) {
+      paint(id, "line-color", "rgba(255,255,255,.26)");
+      paint(id, "line-width", 0.7);
+    }
+    paint("landcover_glacier", "fill-color", "#22314f");
+    paint("landcover_ice_shelf", "fill-color", "#1d2b48");
+  }
+
+  // Atmósfera del globo: halo en el limbo y bruma sobre el terreno, que desaparece al
+  // acercarse para no velar las localizaciones. Si la versión de MapLibre no la soporta, se ignora.
+  installSky() {
+    const dark = this.theme === "dark";
+    try {
+      this.map.setSky({
+        "sky-color": dark ? "#0a1a3a" : "#c8dcff",
+        "sky-horizon-blend": 0.6,
+        "horizon-color": dark ? "#2a5ba8" : "#eaf1ff",
+        "horizon-fog-blend": 0.55,
+        "fog-color": dark ? "#060d20" : "#ffffff",
+        "fog-ground-blend": 0.8,
+        "atmosphere-blend": ["interpolate", ["linear"], ["zoom"], 0, 1, 4, 0.6, 7, 0],
+      });
+    } catch (error) {
+      console.warn("Atmósfera no disponible:", error?.message || error);
+    }
   }
 
   visible() {
@@ -193,7 +238,9 @@ export class FootprintMap {
 
   setGlobe(globe) {
     this.globe = globe;
-    if (this.map && this.ready) this.map.setProjection({ type: globe ? "globe" : "mercator" });
+    if (!this.map || !this.ready) return;
+    this.map.setProjection({ type: globe ? "globe" : "mercator" });
+    if (globe) this.installSky();
   }
 
   fit(locations = this.visible(), { duration = 1600, maxZoom = 8, padding = 70 } = {}) {

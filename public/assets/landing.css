@@ -10,8 +10,32 @@
 /* ---------------- hero ---------------- */
 
 .hero { position: relative; overflow: hidden; min-height: calc(100vh - 70px); display: flex; align-items: center; color: var(--white); background: var(--navy-950); }
-.hero-map { position: absolute; top: -4%; bottom: -12%; right: -12%; width: 74%; }
+.hero-map {
+  position: absolute; top: -4%; bottom: -12%; right: -12%; width: 74%;
+  transform-origin: 62% 50%;
+  --hero-map-base: 1;   /* lo fija el diseño según el ancho */
+  --hero-map-fade: 1;   /* lo baja el scroll al salir del héroe */
+  opacity: calc(var(--hero-map-base) * var(--hero-map-fade));
+}
 .hero-map .maplibregl-ctrl-attrib { display: none; }
+
+/* Aura del globo: un halo cálido bajo el planeta y una vela azul de atmósfera encima,
+   para que el globo no quede recortado sobre el navy plano. */
+.hero-halo {
+  position: absolute; top: 50%; right: 6%; width: 62vw; height: 62vw;
+  max-width: 900px; max-height: 900px; transform: translateY(-50%);
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(255,196,0,.20) 0%, rgba(255,196,0,.06) 38%, transparent 62%),
+    radial-gradient(circle at 42% 34%, rgba(79,140,255,.22) 0%, transparent 58%);
+  filter: blur(18px);
+  animation: halo-drift 16s ease-in-out infinite alternate;
+}
+@keyframes halo-drift {
+  from { transform: translateY(-50%) scale(1); opacity: .85; }
+  to   { transform: translateY(-54%) scale(1.07); opacity: 1; }
+}
+
 .hero-shade {
   position: absolute; inset: 0; pointer-events: none;
   background:
@@ -20,18 +44,45 @@
 }
 .hero-inner { position: relative; z-index: 1; width: 100%; max-width: 1160px; margin: 0 auto; padding: 80px 28px 70px; }
 .eyebrow { margin: 0 0 22px; color: var(--yellow); font-size: 11px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
-.hero h1 { margin: 0; max-width: 16ch; font-size: clamp(36px, 5.2vw, 64px); font-weight: 750; line-height: 1.05; letter-spacing: -.03em; }
+.hero h1 { margin: 0; max-width: 16ch; font-size: clamp(38px, 5.4vw, 68px); font-weight: 760; line-height: 1.03; letter-spacing: -.035em; }
+.hero h1 em {
+  font-style: normal;
+  background: linear-gradient(100deg, var(--yellow) 12%, #ffe27a 48%, #fff6ce 88%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
 .lede { max-width: 54ch; margin: 24px 0 0; color: rgba(255,255,255,.74); font-size: clamp(15px, 1.5vw, 18px); line-height: 1.62; }
 .hero-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 34px; }
 .hero-stats { display: flex; flex-wrap: wrap; gap: 0; margin: 56px 0 0; padding: 0; max-width: 980px; }
 .hero-stats div { padding: 4px 22px 4px 0; margin-right: 22px; border-right: 1px solid rgba(255,255,255,.12); }
 .hero-stats div:last-child { border-right: 0; }
 .hero-stats dt { order: 2; color: rgba(255,255,255,.5); font-size: 11.5px; font-weight: 600; white-space: nowrap; }
-.hero-stats dd { margin: 0 0 2px; color: var(--white); font-size: 28px; font-weight: 750; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
+.hero-stats dd { margin: 0 0 2px; color: var(--white); font-size: 30px; font-weight: 750; letter-spacing: -.035em; font-variant-numeric: tabular-nums; }
 .hero-stats div { display: flex; flex-direction: column-reverse; }
+/* Indicador de scroll: raíl con una luz que cae en bucle. */
+.hero-cue {
+  position: absolute; left: 50%; bottom: 26px; z-index: 2;
+  display: flex; flex-direction: column; align-items: center; gap: 9px;
+  transform: translateX(-50%);
+  color: rgba(255,255,255,.45); font-size: 10.5px; font-weight: 700;
+  letter-spacing: .16em; text-transform: uppercase; text-decoration: none;
+  transition: color 240ms ease;
+}
+.hero-cue:hover { color: var(--yellow); }
+.hero-cue-rail { position: relative; width: 1px; height: 46px; overflow: hidden; background: rgba(255,255,255,.14); }
+.hero-cue-rail span { position: absolute; inset: 0; background: linear-gradient(180deg, transparent, var(--yellow)); animation: cue-fall 2.1s ease-in-out infinite; }
+@keyframes cue-fall { 0% { transform: translateY(-100%); } 60%, 100% { transform: translateY(100%); } }
+
 @media (max-width: 900px) {
-  .hero-map { width: 100%; right: 0; opacity: .45; }
+  .hero-map { width: 100%; right: 0; --hero-map-base: .4; }
+  /* Sin columna libre a la izquierda, el velo tiene que cubrir toda la primera pantalla. */
+  .hero-shade {
+    background:
+      linear-gradient(90deg, var(--navy-950) 0%, rgba(6,13,32,.9) 45%, rgba(6,13,32,.7) 100%),
+      linear-gradient(0deg, var(--navy-950) 0%, rgba(6,13,32,0) 30%);
+  }
+  .hero-halo { right: -10%; width: 110vw; height: 110vw; }
   .hero-stats div { padding-right: 16px; margin: 0 16px 14px 0; }
+  .hero-cue { display: none; }
 }
 
 /* ---------------- bandas ---------------- */
@@ -196,3 +247,72 @@
 .connector-note { margin: 4px 0 6px; color: rgba(255,255,255,.55); font-size: 13px; line-height: 1.55; }
 .connector-case .btn { align-self: flex-start; }
 @media (max-width: 900px) { .connector-cases { grid-template-columns: minmax(0, 1fr); } }
+
+/* ---------------- cadena de agentes que se enciende con el scroll ---------------- */
+
+/* `is-sequenced` solo se aplica si el JS toma el control; sin él las tarjetas quedan
+   encendidas por defecto y la sección se lee igual. */
+.pipeline.is-sequenced .agent-card {
+  opacity: .34;
+  transform: translateY(10px);
+  transition: opacity 520ms var(--ease-out), transform 520ms var(--ease-out), border-color 520ms var(--ease-out), background 520ms var(--ease-out);
+}
+.pipeline.is-sequenced .agent-card.is-live { opacity: 1; transform: none; }
+.pipeline.is-sequenced .agent-card-num { transition: box-shadow 520ms var(--ease-out), transform 520ms var(--ease-out); }
+.pipeline.is-sequenced .agent-card.is-live .agent-card-num {
+  box-shadow: 0 0 0 5px rgba(255, 196, 0, .14), 0 0 18px rgba(255, 196, 0, .5);
+}
+/* La tarjeta que acaba de encenderse destaca sobre las ya encendidas. */
+.pipeline.is-sequenced .agent-card.is-live:not(:has(~ .is-live)) {
+  border-color: rgba(255, 196, 0, .45);
+  background: rgba(255, 196, 0, .07);
+}
+.stage-col { position: relative; }
+/* Filo superior de color en cada etapa, como índice visual de las tres fases. */
+.stage-col::before {
+  content: ""; position: absolute; top: 0; left: 18px; right: 18px; height: 2px;
+  border-radius: 2px; background: linear-gradient(90deg, var(--yellow), transparent);
+  opacity: .5;
+}
+
+/* ---------------- ritmo tipográfico ---------------- */
+
+.band h2 { font-weight: 760; letter-spacing: -.035em; }
+.kicker { display: inline-flex; align-items: center; gap: 8px; }
+.kicker::before {
+  content: ""; width: 20px; height: 2px; border-radius: 2px;
+  background: var(--yellow);
+}
+
+/* ---------------- explorador ---------------- */
+
+.explorer-tab { transition: background 260ms var(--ease-out), color 260ms var(--ease-out); }
+.explorer-tab strong { transition: color 260ms var(--ease-out); }
+.explorer-tab[aria-selected="true"] strong { color: var(--yellow); }
+
+/* ---------------- barras del benchmark ---------------- */
+
+/* Las barras crecen cuando la tarjeta entra en pantalla, no al cargar la página. */
+.bench-bar span { width: 0; transition: width 1200ms var(--ease-out) 180ms; }
+.js [data-reveal].is-in .bench-bar span { width: var(--w); }
+@media (prefers-reduced-motion: reduce) { .bench-bar span { width: var(--w); transition: none; } }
+.bench-row-strong .bench-bar span { box-shadow: 0 0 18px rgba(255, 196, 0, .45); }
+
+/* ---------------- portada en pantallas estrechas ---------------- */
+
+@media (max-width: 640px) {
+  .wrap { padding: 0 18px; }
+  .band { padding: 62px 0; }
+  .hero-inner { padding: 56px 18px 54px; }
+  .hero-stats { margin-top: 38px; }
+  .hero-stats dd { font-size: 24px; }
+  /* Una columna: a dos, las tarjetas de «El reto» y los casos de uso quedan ilegibles. */
+  .source-grid, .pain, .cards { grid-template-columns: minmax(0, 1fr); }
+  .pain-item { border-right: 0; border-bottom: 1px solid var(--slate-200); }
+  .pain-item:last-child { border-bottom: 0; }
+  .bench { padding: 20px; }
+  .bench-row strong { font-size: 24px; }
+  .bench-foot { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .connector-big { font-size: 38px; }
+  .cta-inner { flex-direction: column; align-items: flex-start; }
+}

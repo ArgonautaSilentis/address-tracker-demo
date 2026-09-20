@@ -1,4 +1,5 @@
 import { FootprintMap, LAYERS, escapeHtml } from "/assets/map.js";
+import { initReveal, initSpotlight } from "/assets/motion.js";
 
 const $ = (selector) => document.querySelector(selector);
 const els = {
@@ -808,5 +809,9 @@ async function init() {
   const requested = params.get("empresa");
   await selectCase(summaryOf(requested) ? requested : cases[0].slug, { autorun: params.has("ejecutar") });
 }
+
+// La mesa se monta por bloques al abrirla; el foco del puntero se aplica a los paneles.
+initSpotlight();
+initReveal();
 
 init();

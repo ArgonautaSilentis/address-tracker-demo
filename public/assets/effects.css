@@ -1,0 +1,130 @@
+/* Capa de acabado: revelados, halos, textura y detalles de profundidad.
+   Solo añade; ninguna regla de aquí es necesaria para leer la página sin JavaScript. */
+
+:root {
+  --ease-out: cubic-bezier(.16, 1, .3, 1);
+  --reveal-rise: 22px;
+  --stagger: 70ms;
+  /* Textura de grano muy tenue para las bandas oscuras: evita el degradado plano en pantallas grandes. */
+  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='.38'/%3E%3C/svg%3E");
+}
+
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
+/* Un revelado lateral empieza desplazado hacia fuera y, hasta que se dispara, ensancha la
+   página. `clip` lo recorta sin convertir el body en contenedor de scroll, así la barra
+   superior sigue siendo sticky. */
+body { overflow-x: clip; }
+
+/* ---------------- revelados ---------------- */
+
+/* Solo opacidad y transform: las dos propiedades que el compositor anima sin repintar.
+   Un `filter: blur` aquí queda a merced del hilo principal y se atasca mientras MapLibre
+   descarga teselas, con el texto borroso durante segundos. */
+.js [data-reveal] {
+  opacity: 0;
+  transform: translate3d(0, var(--reveal-rise), 0);
+  transition:
+    opacity 700ms var(--ease-out) calc(var(--i, 0) * var(--stagger)),
+    transform 820ms var(--ease-out) calc(var(--i, 0) * var(--stagger));
+  will-change: opacity, transform;
+}
+.js [data-reveal="left"]  { transform: translate3d(calc(var(--reveal-rise) * -1.4), 0, 0); }
+.js [data-reveal="right"] { transform: translate3d(calc(var(--reveal-rise) * 1.4), 0, 0); }
+.js [data-reveal="scale"] { transform: scale(.965); }
+.js [data-reveal].is-in { opacity: 1; transform: none; }
+.js [data-reveal].is-in { will-change: auto; }
+
+@media (prefers-reduced-motion: reduce) {
+  .js [data-reveal] { opacity: 1; transform: none; transition: none; }
+}
+
+/* En móvil no hay sitio para el movimiento lateral: todo entra desde abajo. */
+@media (max-width: 720px) {
+  .js [data-reveal="left"], .js [data-reveal="right"] { transform: translate3d(0, var(--reveal-rise), 0); }
+}
+
+/* Cada hijo directo de un grupo hereda su turno en el escalonado (`--i` lo pone motion.js). */
+[data-reveal-group] > * { transition-delay: calc(var(--i, 0) * var(--stagger)); }
+
+/* ---------------- barra de progreso de lectura ---------------- */
+
+.scroll-progress {
+  position: fixed; top: 0; left: 0; z-index: 60;
+  width: 100%; height: 3px; transform: scaleX(0); transform-origin: 0 50%;
+  background: linear-gradient(90deg, #ffb000, var(--yellow) 55%, #fff0b8);
+  box-shadow: 0 0 14px rgba(255, 196, 0, .55);
+  pointer-events: none;
+}
+
+/* ---------------- textura y halos ---------------- */
+
+/* Grano sobre las bandas oscuras y aura de color detrás del contenido. */
+.band-dark, .cta, .hero { position: relative; isolation: isolate; }
+.band-dark::before, .cta::before {
+  content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background-image: var(--grain);
+  background-size: 160px 160px;
+  opacity: .035;
+  mix-blend-mode: overlay;
+}
+.band-dark::after {
+  content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background:
+    radial-gradient(60% 55% at 12% 0%, rgba(255, 196, 0, .10), transparent 70%),
+    radial-gradient(50% 50% at 92% 100%, rgba(79, 140, 255, .12), transparent 72%);
+}
+
+/* ---------------- foco que sigue al puntero ---------------- */
+
+[data-spotlight] { position: relative; overflow: hidden; }
+[data-spotlight]::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  opacity: 0; transition: opacity 260ms ease;
+  background: radial-gradient(240px circle at var(--mx, 50%) var(--my, 0%), rgba(255, 196, 0, .13), transparent 62%);
+}
+[data-spotlight]:hover::before { opacity: 1; }
+/* En tarjetas claras el halo es más tenue para no ensuciar el fondo blanco. */
+.source-card[data-spotlight]::before, .card[data-spotlight]::before,
+.tech-card[data-spotlight]::before, .layer-card[data-spotlight]::before {
+  background: radial-gradient(260px circle at var(--mx, 50%) var(--my, 0%), rgba(255, 196, 0, .16), transparent 60%);
+}
+
+/* ---------------- elevación al pasar el puntero ---------------- */
+
+.source-card, .card, .layer-card, .tech-card, .connector-case, .agent-card, .roadmap div {
+  transition: transform 340ms var(--ease-out), box-shadow 340ms var(--ease-out), border-color 340ms var(--ease-out);
+}
+.source-card:hover, .card:hover, .layer-card:hover, .tech-card:hover {
+  transform: translateY(-4px);
+  border-color: rgba(255, 196, 0, .55);
+  box-shadow: 0 18px 40px rgba(6, 13, 32, .10);
+}
+.roadmap div:hover { border-color: var(--yellow); border-style: solid; }
+.connector-case:hover, .agent-card:hover {
+  transform: translateY(-3px);
+  border-color: rgba(255, 196, 0, .35);
+  background: rgba(255, 255, 255, .085);
+}
+
+/* El icono de «El reto» se ilumina con la tarjeta. */
+.source-card .source-icon { transition: transform 340ms var(--ease-out), box-shadow 340ms var(--ease-out); }
+.source-card:hover .source-icon { transform: translateY(-2px) scale(1.06); box-shadow: 0 10px 22px rgba(6, 13, 32, .28); }
+
+/* ---------------- navegación superior ---------------- */
+
+.topnav a { position: relative; padding-bottom: 3px; transition: color 200ms ease; }
+.topnav a::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: -2px; height: 2px;
+  background: var(--yellow); border-radius: 2px;
+  transform: scaleX(0); transform-origin: 0 50%;
+  transition: transform 320ms var(--ease-out);
+}
+.topnav a:hover::after, .topnav a.is-current::after { transform: scaleX(1); }
+.topnav a.is-current { color: var(--white); }
+
+/* ---------------- parallax ---------------- */
+
+[data-parallax] { will-change: transform; transform: translate3d(0, var(--parallax, 0px), 0); }
+@media (prefers-reduced-motion: reduce) { [data-parallax] { transform: none; } }

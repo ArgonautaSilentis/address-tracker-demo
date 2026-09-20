@@ -1,4 +1,8 @@
 import { FootprintMap, LAYERS, escapeHtml } from "/assets/map.js";
+import {
+  reduced, initReveal, initSpotlight, initParallax, initScrollProgress, initSectionNav,
+  countOnView, scrollScene,
+} from "/assets/motion.js";
 
 const DESCRIPTIONS = {
   plan_source_strategy: "Clasifica la empresa por sector y decide qué conectores lideran cada capa.",
@@ -19,7 +23,10 @@ const STAGES = [
 
 const number = new Intl.NumberFormat("es-ES");
 
-const set = (key, value) => { const el = document.querySelector(`[data-stat="${key}"]`); if (el) el.textContent = value; };
+const set = (key, value) => {
+  const el = document.querySelector(`[data-stat="${key}"]`);
+  if (el) countOnView(el, value);
+};
 
 function renderStats(index, details) {
   const locations = index.reduce((acc, c) => acc + c.totals.locations, 0);
@@ -81,9 +88,44 @@ function renderPipeline(agents, example) {
 
 function heroMap() {
   const container = document.querySelector("#heroMap");
-  const map = new FootprintMap(container, { theme: "dark", globe: true, interactive: false, center: [-28, 18], zoom: 2.05 });
+  const map = new FootprintMap(container, { theme: "dark", globe: true, interactive: false, labels: false, center: [-28, 18], zoom: 2.05 });
   map.spin(4);
+
+  // Al salir del héroe, el globo se acerca y se funde con la siguiente banda: la cámara
+  // baja de zoom en MapLibre y el contenedor escala en CSS, que es lo que va suave a 60 fps.
+  const hero = document.querySelector("#hero");
+  const halo = document.querySelector(".hero-halo");
+  const inner = document.querySelector("#heroInner");
+  if (!reduced && hero) {
+    scrollScene(hero, (p) => {
+      const eased = p * p;
+      container.style.transform = `scale(${1 + eased * 0.22}) translate3d(0, ${eased * -5}%, 0)`;
+      container.style.setProperty("--hero-map-fade", String(1 - eased * 0.85));
+      if (halo) halo.style.opacity = String(1 - eased * 1.1);
+      // El texto se va un poco más despacio que el fondo: profundidad sin despegarse del scroll.
+      if (inner) {
+        inner.style.transform = `translate3d(0, ${p * 46}px, 0)`;
+        inner.style.opacity = String(Math.max(0, 1 - p * 1.35));
+      }
+      if (map.ready && map.map) map.map.setZoom(2.05 + eased * 0.55);
+    }, { from: 0, to: 0 });
+  }
   return map;
+}
+
+// La cadena de agentes se enciende conforme se recorre la sección: cada tarjeta pasa de
+// apagada a activa y la última deja toda la columna marcada.
+function pipelineScene() {
+  const pipeline = document.querySelector("#pipeline");
+  const cards = [...pipeline.querySelectorAll(".agent-card")];
+  if (!cards.length) return;
+  if (reduced) { for (const card of cards) card.classList.add("is-live"); return; }
+  pipeline.classList.add("is-sequenced");
+  scrollScene(pipeline, (p) => {
+    // Se completa en el primer 75 % del recorrido para que la última tarjeta no quede a medias.
+    const live = Math.round(Math.min(1, p / 0.75) * cards.length);
+    cards.forEach((card, i) => card.classList.toggle("is-live", i < live));
+  }, { from: 0.85, to: 0.15 });
 }
 
 function renderExplorer(index, loadDetail) {
@@ -149,6 +191,7 @@ async function init() {
   renderExplorer(index, loadDetail);
   const first = await loadDetail(index[0].slug);
   renderPipeline(first.agents, first);
+  pipelineScene();
   // El globo se va poblando empresa a empresa; la más pesada, al final.
   const order = [...index].sort((a, b) => a.totals.locations - b.totals.locations);
   const details = [];
@@ -160,4 +203,13 @@ async function init() {
   renderStats(index, details);
 }
 
-init();
+// El acabado no depende de los datos: se activa ya, para que la portada responda
+// aunque la carga de los casos tarde o falle.
+initScrollProgress(document.querySelector("#scrollProgress"));
+initSpotlight();
+initParallax();
+initSectionNav(document.querySelectorAll(".topnav a"));
+initReveal();
+
+// Si algo falla a mitad de la carga, la portada se quedaba a medias sin decir nada.
+init().catch((error) => console.error("No se pudo completar la carga de la portada:", error));

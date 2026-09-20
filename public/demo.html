@@ -6,9 +6,22 @@
   <title>Address Tracker · Mesa de análisis</title>
   <meta name="description" content="Mesa de análisis de Address Tracker: nueve agentes reconstruyen la huella corporativa y geolocalizada de una empresa.">
   <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,400..900&display=swap">
   <link rel="stylesheet" href="/vendor/maplibre-gl.css">
   <link rel="stylesheet" href="/assets/base.css">
   <link rel="stylesheet" href="/assets/demo.css">
+  <link rel="stylesheet" href="/assets/effects.css">
+  <script>
+    // El revelado al entrar en pantalla parte de opacidad 0, así que depende de que el
+    // módulo de animación llegue a ejecutarse. Si no lo hace (error de red o de módulo),
+    // se retira la clase y la página se ve entera, sin animación.
+    document.documentElement.classList.add("js");
+    setTimeout(function () {
+      if (!document.documentElement.dataset.motion) document.documentElement.classList.remove("js");
+    }, 2500);
+  </script>
 </head>
 <body>
   <header class="topbar">
@@ -24,7 +37,7 @@
   </header>
 
   <main class="workspace">
-    <aside class="queue" aria-labelledby="queueTitle">
+    <aside class="queue" aria-labelledby="queueTitle" data-reveal="left">
       <div class="queue-heading">
         <div>
           <p class="eyebrow-dark">Bandeja</p>
@@ -45,7 +58,7 @@
     </aside>
 
     <section class="stage" aria-live="polite">
-      <section class="hero" id="hero">
+      <section class="hero" id="hero" data-reveal>
         <div class="hero-main">
           <div class="hero-labels">
             <span class="hero-chip" id="sectorChip">Sector</span>
@@ -78,7 +91,7 @@
         </div>
       </section>
 
-      <section class="kpis" aria-label="Indicadores de la ejecución">
+      <section class="kpis" aria-label="Indicadores de la ejecución" data-reveal data-reveal-group style="--i:1">
         <div class="kpi"><span class="kpi-value" id="kpiLocations">0</span><span class="kpi-label">Localizaciones</span></div>
         <div class="kpi"><span class="kpi-value" id="kpiCountries">0</span><span class="kpi-label">Países</span></div>
         <div class="kpi"><span class="kpi-value" id="kpiGeo">—</span><span class="kpi-label">Con coordenadas</span></div>
@@ -89,7 +102,7 @@
       </section>
 
       <div class="grid">
-        <section class="panel flow" aria-labelledby="flowTitle">
+        <section class="panel flow" aria-labelledby="flowTitle" data-reveal="left" style="--i:2">
           <div class="panel-heading">
             <div>
               <p class="eyebrow-dark">01 · Orquestación</p>
@@ -100,7 +113,7 @@
           <div class="flow-list" id="flowList"></div>
         </section>
 
-        <section class="panel map-panel" aria-labelledby="mapTitle">
+        <section class="panel map-panel" aria-labelledby="mapTitle" data-reveal="right" style="--i:2">
           <div class="panel-heading map-heading">
             <div>
               <p class="eyebrow-dark">02 · Huella geolocalizada</p>
@@ -131,7 +144,7 @@
         </section>
       </div>
 
-      <section class="panel results" aria-labelledby="resultsTitle">
+      <section class="panel results" aria-labelledby="resultsTitle" data-reveal style="--i:3">
         <div class="panel-heading results-heading">
           <div>
             <p class="eyebrow-dark">03 · Resultado</p>

@@ -146,3 +146,18 @@ button { font: inherit; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 1ms !important; transition-duration: 1ms !important; }
 }
+
+/* ---------------- barra superior en pantallas estrechas ---------------- */
+
+/* A 375 px la marca completa, la navegación y el botón no caben y la página quedaba con
+   desplazamiento horizontal. En móvil la marca se reduce a su nombre y la barra se aprieta. */
+@media (max-width: 640px) {
+  .topbar { gap: 12px; padding: 0 16px; height: 62px; }
+  .brand { gap: 9px; }
+  .brand-copy > span { display: none; }
+  .brand-copy strong { font-size: 11px; letter-spacing: .1em; }
+  .btn-sm { padding: 8px 12px; font-size: 12px; }
+}
+@media (max-width: 380px) {
+  .brand-copy strong { font-size: 10px; letter-spacing: .06em; }
+}
