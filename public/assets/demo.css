@@ -355,3 +355,8 @@ body { background: var(--slate-100); }
 .notes-cell { color: var(--slate-600) !important; font-size: 12px !important; line-height: 1.45; }
 .plan-fallback-text { margin: 12px 0 0 !important; }
 .plan-fallback-text b { color: var(--navy-900); }
+
+/* La mesa de análisis se monta por bloques al abrirla: el desplazamiento es corto,
+   lo justo para que se note el orden de llegada sin retrasar el trabajo. */
+.workspace { --reveal-rise: 14px; --stagger: 55ms; }
+.panel { transition: border-color 320ms var(--ease-out), box-shadow 320ms var(--ease-out); }

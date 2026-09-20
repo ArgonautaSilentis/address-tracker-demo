@@ -12,7 +12,11 @@ Las fuentes salen de las salidas de cada agente (`source_url`, `source_type`, `g
 ```
 public/
   index.html, demo.html     páginas
-  assets/                   estilos, módulo del mapa y lógica de cada página
+  assets/base.css           tokens de color, tipografía y piezas comunes
+  assets/effects.css        acabado: revelados, halos, textura y foco del puntero
+  assets/motion.js          revelados, contadores y escenas ligadas al scroll
+  assets/map.js             mapa y globo sobre MapLibre
+  assets/landing.*, demo.*  estilos y lógica de cada página
   data/index.json           resumen de cada empresa (bandeja y portada)
   data/cases/<empresa>.json detalle: pasos del flujo, perfil, estrategia y localizaciones
   vendor/                   MapLibre GL JS (UMD, BSD-3)
@@ -22,7 +26,15 @@ scripts/
 test/data.test.mjs          integridad de los datos
 ```
 
-Sitio estático, sin dependencias ni paso de build. La cartografía usa los estilos vectoriales de [OpenFreeMap](https://openfreemap.org) (sin clave).
+Sitio estático, sin dependencias ni paso de build. La cartografía usa los estilos vectoriales de [OpenFreeMap](https://openfreemap.org) (sin clave) y la tipografía es Inter, servida por Google Fonts; sin ella, el sistema cae en la fuente del sistema operativo.
+
+## Diseño y movimiento
+
+`assets/motion.js` es la única capa de animación: `IntersectionObserver` para los revelados, `requestAnimationFrame` para las escenas ligadas al scroll. Sin librerías y sin secuestrar el scroll, de modo que el gesto del trackpad y el zoom sobre el mapa siguen siendo los nativos.
+
+- **Portada.** El globo del héroe se acerca y se funde al salir de la primera pantalla; la cadena de nueve agentes se enciende tarjeta a tarjeta conforme se recorre la sección; los números cuentan al entrar en pantalla y las barras del benchmark crecen al revelarse.
+- **Globo.** Proyección de globo con atmósfera (`setSky`). En la portada es decorativo: sin topónimos y con la tierra separada del agua, para que solo destaquen los puntos de la huella. En la mesa de análisis conserva los topónimos, que ahí sí son información.
+- **Sin JavaScript.** Los revelados cuelgan de la clase `js` que pone un script en línea del `<head>`; si el módulo no llega a ejecutarse en 2,5 s, la clase se retira y la página se ve entera. `prefers-reduced-motion` desactiva todo el movimiento.
 
 ## Uso local
 
