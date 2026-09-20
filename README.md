@@ -34,6 +34,7 @@ Sitio estático, sin dependencias ni paso de build. La cartografía usa los esti
 
 - **Portada.** El globo del héroe se acerca y se funde al salir de la primera pantalla; la cadena de nueve agentes se enciende tarjeta a tarjeta conforme se recorre la sección; los números cuentan al entrar en pantalla y las barras del benchmark crecen al revelarse.
 - **Globo.** Proyección de globo con atmósfera (`setSky`). En la portada es decorativo: sin topónimos y con la tierra separada del agua, para que solo destaquen los puntos de la huella. En la mesa de análisis conserva los topónimos, que ahí sí son información.
+- **Entre páginas.** La navegación entre la portada y la mesa de análisis usa la View Transitions API nativa (`@view-transition`), sin JavaScript: el contenido se cruza y la barra superior se queda quieta porque comparte `view-transition-name` en las dos páginas. Donde no está soportada, la navegación es la de siempre.
 - **Sin JavaScript.** Los revelados cuelgan de la clase `js` que pone un script en línea del `<head>`; si el módulo no llega a ejecutarse en 2,5 s, la clase se retira y la página se ve entera. `prefers-reduced-motion` desactiva todo el movimiento.
 
 ## Uso local
