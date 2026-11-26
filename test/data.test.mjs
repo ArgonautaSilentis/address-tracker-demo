@@ -27,6 +27,27 @@ test("cada paso tiene registro y las métricas solo aparecen si hay resumen de c
   }
 });
 
+test("el desglose de tokens cuadra y el coste responde a la tarifa de cada dirección", () => {
+  // gpt-4o-mini, por millón: entrada 0,15 y salida 0,60. Si el flujo aplicara una sola
+  // tarifa a todos los tokens, el coste se saldría de esta horquilla en los agentes que
+  // escriben mucho, que es justo lo que esta prueba vigila.
+  const ENTRADA = 0.15 / 1e6;
+  const SALIDA = 0.60 / 1e6;
+  for (const data of details) {
+    if (!data.hasCost) continue;
+    for (const agent of data.agents) {
+      if (agent.kind !== "agent") continue;
+      assert.equal(agent.promptTokens + agent.completionTokens, agent.tokens,
+        `${data.name} · ${agent.task}: el desglose no suma el total`);
+      const esperado = agent.promptTokens * ENTRADA + agent.completionTokens * SALIDA;
+      assert.ok(Math.abs(agent.costUsd - esperado) < 1e-4,
+        `${data.name} · ${agent.task}: coste ${agent.costUsd} frente a ${esperado.toFixed(6)} por tarifa`);
+    }
+    const t = data.totals;
+    assert.equal(t.promptTokens + t.completionTokens, t.tokens, `${data.name}: el total no cuadra con su desglose`);
+  }
+});
+
 test("cada localización tiene capa, paso que la revela y coordenadas válidas si las tiene", () => {
   for (const data of details) {
     const steps = new Set(data.agents.map((agent) => agent.task));

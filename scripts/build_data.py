@@ -725,6 +725,10 @@ def build_case(slug, run_id, plan_run, connectors_key, outputs):
             extra["strategy"], extra["fallback"] = plan_strategy(plan)
         agents.append({**step, "kind": "agent", "model": metrics.get("model", "gpt-4o-mini"),
                        "requests": metrics.get("successful_requests", 0), "tokens": metrics.get("total_tokens", 0),
+                       # Entrada y salida van por separado: la salida cuesta cuatro veces más, y sin
+                       # el desglose no se puede explicar de dónde sale el coste de cada agente.
+                       "promptTokens": metrics.get("prompt_tokens", 0),
+                       "completionTokens": metrics.get("completion_tokens", 0),
                        "costUsd": metrics.get("estimated_cost_usd", 0), "records": task_records,
                        "log": logs[step["task"]], "mapped": step_counts.get(step["task"], 0), **extra})
 
@@ -780,6 +784,8 @@ def build_case(slug, run_id, plan_run, connectors_key, outputs):
             "connectorRecords": sum(s["records"] for s in connector_steps), "steps": len(agents),
             "requests": cost["total"]["successful_requests"] if cost else None,
             "tokens": cost["total"]["total_tokens"] if cost else None,
+            "promptTokens": cost["total"]["prompt_tokens"] if cost else None,
+            "completionTokens": cost["total"]["completion_tokens"] if cost else None,
             "costUsd": cost["total"]["estimated_cost_usd"] if cost else None,
         },
     }
