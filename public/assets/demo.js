@@ -15,6 +15,7 @@ const els = {
     requests: $("#kpiRequests"), tokens: $("#kpiTokens"), cost: $("#kpiCost"),
   },
   kpiLabel: { requests: $("#kpiRequestsLabel"), tokens: $("#kpiTokensLabel"), cost: $("#kpiCostLabel") },
+  kpiNote: { tokens: $("#kpiTokensNote") },
 };
 
 const STAGES = { plan: "Planificación", extract: "Extracción", consolidate: "Consolidación", connectors: "Conectores sectoriales" };
@@ -72,7 +73,7 @@ function loadDetail(slug) {
 function freshRun(data, status = "idle") {
   return {
     status, elapsed: 0, revealed: [], revealedIds: new Set(), countries: new Set(), layerCounts: {},
-    agents: data ? data.agents.map(() => ({ status: "pending", lines: 0, tokens: 0, requests: 0, cost: 0, records: 0, progress: 0 })) : [],
+    agents: data ? data.agents.map(() => ({ status: "pending", lines: 0, tokens: 0, promptTokens: 0, completionTokens: 0, requests: 0, cost: 0, records: 0, progress: 0 })) : [],
   };
 }
 
@@ -220,6 +221,12 @@ function renderKpis() {
     const sum = (field) => run.agents.reduce((acc, a) => acc + a[field], 0);
     setKpi("requests", number.format(Math.round(sum("requests"))));
     setKpi("tokens", compact.format(Math.round(sum("tokens"))));
+    // El reparto es lo que explica el coste: la salida se paga cuatro veces más cara.
+    const entrada = sum("promptTokens");
+    const salida = sum("completionTokens");
+    els.kpiNote.tokens.textContent = entrada || salida
+      ? `${compact.format(Math.round(entrada))} entrada · ${compact.format(Math.round(salida))} salida`
+      : "";
     setKpi("cost", usd(sum("cost")));
   } else {
     els.kpiLabel.requests.textContent = "Pasos completados";
@@ -229,6 +236,7 @@ function renderKpis() {
     const connectorRecords = data ? data.agents.reduce((acc, agent, i) => acc + (agent.kind === "connector" ? run.agents[i].records : 0), 0) : 0;
     setKpi("requests", `${done}/${item.totals.steps}`);
     setKpi("tokens", number.format(Math.round(connectorRecords)));
+    els.kpiNote.tokens.textContent = "";
     setKpi("cost", exported ? number.format(item.totals.sources) : "—");
   }
 }
@@ -311,7 +319,11 @@ function updateAgent(index) {
   if (s.status === "pending") stats.innerHTML = "";
   else if (data.hasCost) {
     stats.innerHTML = `<span>Modelo <b>${escapeHtml(agent.model)}</b></span><span>Llamadas <b>${number.format(Math.round(s.requests))}</b></span>` +
-      `<span>Tokens <b>${number.format(Math.round(s.tokens))}</b></span><span>Coste <b>${usd(s.cost, 4)}</b></span>`;
+      `<span>Tokens <b>${number.format(Math.round(s.tokens))}</b></span>` +
+      (s.promptTokens || s.completionTokens
+        ? `<span>Entrada <b>${number.format(Math.round(s.promptTokens))}</b></span><span>Salida <b>${number.format(Math.round(s.completionTokens))}</b></span>`
+        : "") +
+      `<span>Coste <b>${usd(s.cost, 4)}</b></span>`;
   } else {
     stats.innerHTML = `<span>${agent.kind === "connector" ? "Conector" : "Agente"}</span>` +
       `<span>Registros <b>${number.format(Math.round(s.records))}</b></span>` +
@@ -698,6 +710,8 @@ async function runCase(slug) {
       s.lines = Math.min(lineCount, Math.floor(progress * lineCount) + 1);
       const eased = 1 - Math.pow(1 - progress, 1.6);
       s.tokens = agent.tokens * eased;
+      s.promptTokens = (agent.promptTokens || 0) * eased;
+      s.completionTokens = (agent.completionTokens || 0) * eased;
       s.requests = agent.requests ? Math.max(1, agent.requests * eased) : 0;
       s.cost = agent.costUsd * eased;
       s.records = agent.records * eased;
@@ -709,7 +723,9 @@ async function runCase(slug) {
       progress = Math.min(1, progress + ((now - last) * state.speed) / base);
       last = now;
     }
-    Object.assign(s, { status: "done", lines: lineCount, tokens: agent.tokens, requests: agent.requests, cost: agent.costUsd, records: agent.records, progress: 0 });
+    Object.assign(s, { status: "done", lines: lineCount, tokens: agent.tokens,
+      promptTokens: agent.promptTokens || 0, completionTokens: agent.completionTokens || 0,
+      requests: agent.requests, cost: agent.costUsd, records: agent.records, progress: 0 });
     if (isCurrent()) { updateAgent(index); renderProgress(); renderKpis(); }
     await revealStep(slug, run, data.byStep.get(agent.task), isCurrent);
     await sleep(350 / state.speed);
