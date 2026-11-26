@@ -9,7 +9,11 @@
   --navy-700: #203253;
   --slate-700: #3b4962;
   --slate-600: #58647a;
-  --slate-500: #758096;
+  /* Oscurecido desde #758096, que se quedaba en 3,97:1 sobre blanco y 3,64:1 sobre
+     --slate-100. Este pasa el 4,5:1 de la AA en blanco, en --slate-100 y en el
+     amarillo pálido de la banda de cobertura, que son sus tres fondos reales, con
+     margen suficiente para que el más exigente (--slate-100) no quede en el filo. */
+  --slate-500: #636d80;
   --slate-400: #9ca5b5;
   --slate-300: #c8ced8;
   --slate-200: #e1e5eb;
